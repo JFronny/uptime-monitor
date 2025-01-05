@@ -2,7 +2,7 @@ import { checkTls } from "./check-tls"
 
 test("checkTls", async () => {
     const tcpResult = await checkTls({
-        address: "frohnmeyer-wds.de",
+        address: "smtp.gmail.com",
         port: 465
     })
     expect(tcpResult.results.every(
@@ -16,7 +16,6 @@ test("checkTls2", async () => {
     const tcpResult = await checkTls({
         address: "wrong.host.badssl.com",
     })
-    console.log(tcpResult)
     expect(tcpResult.results.every(
         (result) => Object.prototype.toString.call((result as any).err) === "[object Error]"
     )).toBe(true)
