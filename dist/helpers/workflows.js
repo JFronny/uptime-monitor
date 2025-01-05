@@ -44,8 +44,8 @@ const publishPage = async (config) => {
         name: Upload Pages artifact
         with:
           path: "site/status-page/__sapper__/export/"
-      - uses: Deploy to GitHub Pages
-        uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@v4
+        name: Deploy to GitHub Pages
     `;
     }
     else {
