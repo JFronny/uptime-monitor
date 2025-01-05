@@ -19,6 +19,7 @@ const github_1 = require("./helpers/github");
 const init_check_1 = require("./helpers/init-check");
 const notifme_1 = require("./helpers/notifme");
 const ping_1 = require("./helpers/ping");
+const check_tls_1 = require("./helpers/check-tls");
 const request_1 = require("./helpers/request");
 const secrets_1 = require("./helpers/secrets");
 const summary_1 = require("./summary");
@@ -158,6 +159,39 @@ const update = async (shouldCommit = false) => {
                             throw new Error("Site IP address could not be resolved");
                     }
                     const tcpResult = await (0, ping_1.ping)({
+                        address,
+                        attempts: 5,
+                        port: Number((0, environment_1.replaceEnvironmentVariables)(site.port ? String(site.port) : "")),
+                    });
+                    if (tcpResult.results.every((result) => Object.prototype.toString.call(result.err) === "[object Error]"))
+                        throw Error("all attempts failed");
+                    console.log("Got result", tcpResult);
+                    let responseTime = (tcpResult.avg || 0).toFixed(0);
+                    if (parseInt(responseTime) > (site.maxResponseTime || 60000))
+                        status = "degraded";
+                    return {
+                        result: { httpCode: 200 },
+                        responseTime,
+                        status,
+                    };
+                }
+                catch (error) {
+                    console.log("ERROR Got pinging error", error);
+                    return { result: { httpCode: 0 }, responseTime: (0).toFixed(0), status: "down" };
+                }
+            }
+            else if (site.check === "ssl") {
+                console.log("Using check-tls instead of curl");
+                try {
+                    let status = "up";
+                    // https://github.com/upptime/upptime/discussions/888
+                    const url = (0, environment_1.replaceEnvironmentVariables)(site.url);
+                    let address = url;
+                    if ((0, net_1.isIP)(url)) {
+                        if (site.ipv6 && !(0, net_1.isIPv6)(url))
+                            throw new Error("Site URL must be IPv6 for ipv6 check");
+                    }
+                    const tcpResult = await (0, check_tls_1.checkTls)({
                         address,
                         attempts: 5,
                         port: Number((0, environment_1.replaceEnvironmentVariables)(site.port ? String(site.port) : "")),
