@@ -33,7 +33,7 @@ const introComment = async () => `#
 # * Docs and more: https://upptime.js.org
 # * More by Anand Chowdhary: https://anandchowdhary.com
 `;
-const publishPagePrelude = async (config) => {
+const publishPagePrelude = async (config, workflows) => {
     const statusWebsite = config["status-website"] || {};
     if (statusWebsite.actions || false) {
         return `
@@ -41,6 +41,7 @@ const publishPagePrelude = async (config) => {
       contents: write
       pages: write
       id-token: write
+      workflows: ${workflows ? "write" : "read"}
     environment:
       name: github-pages
       url: \${{ steps.deployment.outputs.page_url }}
@@ -48,6 +49,9 @@ const publishPagePrelude = async (config) => {
     }
     else {
         return `
+    permissions:
+      contents: write
+      workflows: ${workflows ? "write" : "read"}
 `;
     }
 };
@@ -170,7 +174,7 @@ jobs:
   release:
     name: Setup Upptime
     runs-on: ${config.runner || constants_1.DEFAULT_RUNNER}
-    ${await publishPagePrelude(config)}
+    ${await publishPagePrelude(config, true)}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -228,7 +232,7 @@ jobs:
   release:
     name: Build and deploy site
     runs-on: ${config.runner || constants_1.DEFAULT_RUNNER}
-    ${await publishPagePrelude(config)}
+    ${await publishPagePrelude(config, false)}
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     steps:
       - name: Checkout
@@ -297,6 +301,7 @@ jobs:
     runs-on: ${config.runner || constants_1.DEFAULT_RUNNER}
     permissions:
       contents: write
+      workflows: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
