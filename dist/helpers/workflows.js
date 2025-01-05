@@ -38,7 +38,7 @@ const publishPagePrelude = async (config) => {
     if (statusWebsite.actions || false) {
         return `
     permissions:
-      contents: read
+      contents: write
       pages: write
       id-token: write
     environment:
@@ -94,6 +94,8 @@ jobs:
   release:
     name: Generate graphs
     runs-on: ${config.runner || constants_1.DEFAULT_RUNNER}
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -134,6 +136,8 @@ jobs:
   release:
     name: Check status
     runs-on: ${config.runner || constants_1.DEFAULT_RUNNER}
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -257,6 +261,8 @@ jobs:
   release:
     name: Generate README
     runs-on: ${config.runner || constants_1.DEFAULT_RUNNER}
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -288,6 +294,8 @@ jobs:
   release:
     name: Build
     runs-on: ${config.runner || constants_1.DEFAULT_RUNNER}
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -319,6 +327,8 @@ jobs:
   release:
     name: Deploy updates
     runs-on: ${config.runner || constants_1.DEFAULT_RUNNER}
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -348,6 +358,8 @@ jobs:
   release:
     name: Check status
     runs-on: ${config.runner || constants_1.DEFAULT_RUNNER}
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const check_tls_1 = require("./check-tls");
 test("checkTls", async () => {
     const tcpResult = await (0, check_tls_1.checkTls)({
-        address: "frohnmeyer-wds.de",
+        address: "smtp.gmail.com",
         port: 465
     });
     expect(tcpResult.results.every((result) => Object.prototype.toString.call(result.err) === "[object Error]")).toBe(false);
@@ -14,7 +14,6 @@ test("checkTls2", async () => {
     const tcpResult = await (0, check_tls_1.checkTls)({
         address: "wrong.host.badssl.com",
     });
-    console.log(tcpResult);
     expect(tcpResult.results.every((result) => Object.prototype.toString.call(result.err) === "[object Error]")).toBe(true);
     expect(tcpResult.avg).toBe(0);
 });
