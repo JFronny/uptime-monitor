@@ -41,7 +41,7 @@ const introComment = async () => `#
 # * More by Anand Chowdhary: https://anandchowdhary.com
 `;
 
-const publishPagePrelude = async(config: UpptimeConfig, workflows: boolean) => {
+const publishPagePrelude = async(config: UpptimeConfig) => {
   const statusWebsite = config["status-website"] || {};
   if (statusWebsite.actions || false) {
     return `
@@ -49,7 +49,6 @@ const publishPagePrelude = async(config: UpptimeConfig, workflows: boolean) => {
       contents: write
       pages: write
       id-token: write
-      workflows: ${workflows ? "write" : "read"}
     environment:
       name: github-pages
       url: \${{ steps.deployment.outputs.page_url }}
@@ -58,7 +57,6 @@ const publishPagePrelude = async(config: UpptimeConfig, workflows: boolean) => {
     return `
     permissions:
       contents: write
-      workflows: ${workflows ? "write" : "read"}
 `
   }
 }
@@ -82,7 +80,7 @@ const publishPage = async(config: UpptimeConfig) => {
       - uses: peaceiris/actions-gh-pages@v4
         name: GitHub Pages Deploy
         with:
-          github_token: \${{ secrets.GH_PAT || github.token }}
+          github_token: \${{ github.token }}
           publish_dir: "site/status-page/__sapper__/export/"
           force_orphan: "${statusWebsite.singleCommit || false}"
           user_name: "${commitMessages.commitAuthorName || "Upptime Bot"}"
@@ -116,13 +114,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: \${{ github.head_ref }}
-          token: \${{ secrets.GH_PAT || github.token }}
       - name: Generate graphs
         uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
           command: "graphs"
         env:
-          GH_PAT: \${{ secrets.GH_PAT || github.token }}
+          GH_PAT: \${{ github.token }}
 `;
 };
 
@@ -159,13 +156,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: \${{ github.head_ref }}
-          token: \${{ secrets.GH_PAT || github.token }}
       - name: Update response time
         uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
           command: "response-time"
         env:
-          GH_PAT: \${{ secrets.GH_PAT || github.token }}
+          GH_PAT: \${{ github.token }}
           SECRETS_CONTEXT: \${{ toJson(secrets) }}
 `;
 };
@@ -187,44 +183,43 @@ jobs:
   release:
     name: Setup Upptime
     runs-on: ${config.runner || DEFAULT_RUNNER}
-    ${await publishPagePrelude(config, true)}
+    ${await publishPagePrelude(config)}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: \${{ github.head_ref }}
-          token: \${{ secrets.GH_PAT || github.token }}
       - name: Update template
         uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
           command: "update-template"
         env:
-          GH_PAT: \${{ secrets.GH_PAT || github.token }}
+          GH_PAT: \${{ secrets.GH_PAT }}
       - name: Update response time
         uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
           command: "response-time"
         env:
-          GH_PAT: \${{ secrets.GH_PAT || github.token }}
+          GH_PAT: \${{ github.token }}
           SECRETS_CONTEXT: \${{ toJson(secrets) }}
       - name: Update summary in README
         uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
           command: "readme"
         env:
-          GH_PAT: \${{ secrets.GH_PAT || github.token }}
+          GH_PAT: \${{ github.token }}
       - name: Generate graphs
         uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
           command: "graphs"
         env:
-          GH_PAT: \${{ secrets.GH_PAT || github.token }}
+          GH_PAT: \${{ github.token }}
       - name: Generate site
         uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
           command: "site"
         env:
-          GH_PAT: \${{ secrets.GH_PAT || github.token }}
+          GH_PAT: \${{ github.token }}
 ${await publishPage(config)}
 `;
 };
@@ -246,20 +241,19 @@ jobs:
   release:
     name: Build and deploy site
     runs-on: ${config.runner || DEFAULT_RUNNER}
-    ${await publishPagePrelude(config, false)}
+    ${await publishPagePrelude(config)}
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: \${{ github.head_ref }}
-          token: \${{ secrets.GH_PAT || github.token }}
       - name: Generate site
         uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
           command: "site"
         env:
-          GH_PAT: \${{ secrets.GH_PAT || github.token }}
+          GH_PAT: \${{ github.token }}
 ${await publishPage(config)}
 `;
 };
@@ -288,13 +282,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: \${{ github.head_ref }}
-          token: \${{ secrets.GH_PAT || github.token }}
       - name: Update summary in README
         uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
           command: "readme"
         env:
-          GH_PAT: \${{ secrets.GH_PAT || github.token }}
+          GH_PAT: \${{ github.token }}
 `;
 };
 
@@ -317,19 +310,17 @@ jobs:
     runs-on: ${config.runner || DEFAULT_RUNNER}
     permissions:
       contents: write
-      workflows: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: \${{ github.head_ref }}
-          token: \${{ secrets.GH_PAT || github.token }}
       - name: Update template
         uses: JFronny/uptime-monitor@master
         with:
           command: "update-template"
         env:
-          GH_PAT: \${{ secrets.GH_PAT || github.token }}
+          GH_PAT: \${{ secrets.GH_PAT }}
 `;
 };
 
@@ -357,11 +348,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: \${{ github.head_ref }}
-          token: \${{ secrets.GH_PAT || github.token }}
       - name: Update code
         uses: upptime/updates@master
         env:
-          GH_PAT: \${{ secrets.GH_PAT || github.token }}
+          GH_PAT: \${{ secrets.GH_PAT }}
 `;
 };
 
@@ -389,13 +379,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: \${{ github.head_ref }}
-          token: \${{ secrets.GH_PAT || github.token }}
       - name: Check endpoint status
         uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
           command: "update"
         env:
-          GH_PAT: \${{ secrets.GH_PAT || github.token }}
+          GH_PAT: \${{ github.token }}
           SECRETS_CONTEXT: \${{ toJson(secrets) }}
 `;
 };
