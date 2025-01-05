@@ -181,7 +181,7 @@ jobs:
         with:
           command: "update-template"
         env:
-          GH_PAT: \${{ secrets.GH_PAT }}
+          GH_PAT: \${{ secrets.USER_PAT }}
       - name: Update response time
         uses: JFronny/uptime-monitor@${await (0, exports.getUptimeMonitorVersion)()}
         with:
@@ -304,7 +304,7 @@ jobs:
         with:
           command: "update-template"
         env:
-          GH_PAT: \${{ secrets.GH_PAT }}
+          GH_PAT: \${{ secrets.USER_PAT }}
 `;
 };
 exports.updateTemplateCiWorkflow = updateTemplateCiWorkflow;
@@ -334,7 +334,7 @@ jobs:
       - name: Update code
         uses: upptime/updates@master
         env:
-          GH_PAT: \${{ secrets.GH_PAT }}
+          GH_PAT: \${{ secrets.USER_PAT }}
 `;
 };
 exports.updatesCiWorkflow = updatesCiWorkflow;
