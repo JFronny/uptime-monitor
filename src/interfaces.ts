@@ -6,6 +6,9 @@ export interface UpptimeConfig {
     check?: "http" | "tcp-ping";
     method?: string;
     name: string;
+    tags?: string[];
+    startScript?: string,
+    endScript?: string,
     url: string;
     port?: number;
     expectedStatusCodes?: number[];

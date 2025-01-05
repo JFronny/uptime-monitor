@@ -56,8 +56,23 @@ export const updateTemplate = async () => {
       if (`${owner}/${repo}` !== "upptime/upptime") await remove(join(".", file));
     } catch (error) {}
   console.log("Removed template files");
+  
+  const slugs :string[] = [];
+  for (const site of config.sites){
+    const tags = site.tags || ['default'];
+    for (const tag of tags){
+      // default  ->  name
+      // other    ->  name+ tag
+      const siteName :string = tag !=='default'? `${site.name} ${tag}`:site.name;
+      // default, slug    ->  slug
+      // other, slug      ->  slugify(slug+ tag)
+      // other, undefined ->  slugify(siteName)
+      const slug :string = tag ==='default' && site.slug ? site.slug : (site.slug ? slugify(`${site.slug} ${tag}`) : slugify(siteName));
+      slugs.push(slug)
+    }
+  }
 
-  const slugs = config.sites.map((site) => site.slug || slugify(site.name));
+
   const filesToKeep = ["LICENSE", "summary.json"];
 
   // Remove old data from ./api

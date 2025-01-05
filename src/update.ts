@@ -14,6 +14,7 @@ import { curl } from "./helpers/request";
 import { getOwnerRepo } from "./helpers/secrets";
 import { SiteHistory } from "./interfaces";
 import { generateSummary } from "./summary";
+import { exec, chmod } from "shelljs";
 
 export const update = async (shouldCommit = false) => {
   if (!(await shouldContinue())) return;
@@ -82,138 +83,168 @@ export const update = async (shouldCommit = false) => {
   }
 
   for await (const site of config.sites) {
-    console.log("Checking", site.url);
-
-    const slug = site.slug || slugify(site.name);
-    let currentStatus = "unknown";
-    let startTime = new Date();
-    try {
-      const siteHistory = load(
-        (await readFile(join(".", "history", `${slug}.yml`), "utf8"))
-          .split("\n")
-          .map((line) => (line.startsWith("- ") ? line.replace("- ", "") : line))
-          .join("\n")
-      ) as SiteHistory;
-      currentStatus = siteHistory.status || "unknown";
-      startTime = new Date(siteHistory.startTime || new Date());
-    } catch (error) {}
-    console.log("Current status", site.slug, currentStatus, startTime);
-
-    /**
-     * Check whether the site is online
-     */
-    const performTestOnce = async (): Promise<{
-      result: {
-        httpCode: number;
-      };
-      responseTime: string;
-      status: "up" | "down" | "degraded";
-    }> => {
-      if (site.check === "tcp-ping") {
-        console.log("Using tcp-ping instead of curl");
-        try {
-          let status: "up" | "down" | "degraded" = "up";
-          if (parseInt(responseTime) > (site.maxResponseTime || 60000)) status = "degraded";
-          const tcpResult = await ping({
-            address: replaceEnvironmentVariables(site.url),
-            attempts: 5,
-            port: Number(replaceEnvironmentVariables(site.port ? String(site.port) : "")),
-          });
-          console.log("Got result", tcpResult);
-          return {
-            result: { httpCode: 200 },
-            responseTime: (tcpResult.avg || 0).toFixed(0),
-            status,
-          };
-        } catch (error) {
-          console.log("Got pinging error", error);
-          return { result: { httpCode: 0 }, responseTime: (0).toFixed(0), status: "down" };
+    const tags: string[] = site.tags || ["default"];
+    for await (const tag of tags) {
+      if (tag !== "default" && site.startScript) {
+        if (exec(`${site.startScript} ${site.name} ${site.url} ${tag}`).code != 0) {
+          // error:: skip update for this name+tag
+          continue;
         }
-      } else {
-        const result = await curl(site);
-        console.log("Result from test", result.httpCode, result.totalTime);
-        const responseTime = (result.totalTime * 1000).toFixed(0);
-        const expectedStatusCodes = (
-          site.expectedStatusCodes || [
-            200,
-            201,
-            202,
-            203,
-            200,
-            204,
-            205,
-            206,
-            207,
-            208,
-            226,
-            300,
-            301,
-            302,
-            303,
-            304,
-            305,
-            306,
-            307,
-            308,
-          ]
-        ).map(Number);
-        let status: "up" | "down" | "degraded" = expectedStatusCodes.includes(
-          Number(result.httpCode)
-        )
-          ? "up"
-          : "down";
-        if (parseInt(responseTime) > (site.maxResponseTime || 60000)) status = "degraded";
-        if (status === "up" && typeof result.data === "string") {
-          if (site.__dangerous__body_down && result.data.includes(site.__dangerous__body_down))
-            status = "down";
+      }
+      console.log("Checking", site.url);
+
+      // default  ->  name
+      // other    ->  name+ tag
+      const siteName: string = tag !== "default" ? `${site.name} ${tag}` : site.name;
+      // default, slug    ->  slug
+      // other, slug      ->  slugify(slug+ tag)
+      // other, undefined ->  slugify(siteName)
+      const slug: string =
+        tag === "default" && site.slug
+          ? site.slug
+          : site.slug
+          ? slugify(`${site.slug} ${tag}`)
+          : slugify(siteName);
+
+      let currentStatus = "unknown";
+      let startTime = new Date();
+      try {
+        const siteHistory = load(
+          (await readFile(join(".", "history", `${slug}.yml`), "utf8"))
+            .split("\n")
+            .map((line) => (line.startsWith("- ") ? line.replace("- ", "") : line))
+            .join("\n")
+        ) as SiteHistory;
+        currentStatus = siteHistory.status || "unknown";
+        startTime = new Date(siteHistory.startTime || new Date());
+      } catch (error) {}
+      console.log("Current status", site.slug, currentStatus, startTime);
+
+      /**
+       * Check whether the site is online
+       */
+      const performTestOnce = async (): Promise<{
+        result: {
+          httpCode: number;
+        };
+        responseTime: string;
+        status: "up" | "down" | "degraded";
+      }> => {
+        if (site.check === "tcp-ping") {
+          console.log("Using tcp-ping instead of curl");
+          try {
+            let status: "up" | "down" | "degraded" = "up";
+            const tcpResult = await ping({
+              address: replaceEnvironmentVariables(site.url),
+              attempts: 5,
+              port: Number(replaceEnvironmentVariables(site.port ? String(site.port) : "")),
+            });
+            if(tcpResult.results.every(result => Object.prototype.toString.call(result.err) === "[object Error]"))
+              throw Error('all attempts failed');
+            console.log("Got result", tcpResult);
+            let responseTime = (tcpResult.avg || 0).toFixed(0);
+            if (parseInt(responseTime) > (site.maxResponseTime || 60000)) status = "degraded";
+            return {
+              result: { httpCode: 200 },
+              responseTime,
+              status,
+            };
+          } catch (error) {
+            console.log("Got pinging error", error.message);
+            return { result: { httpCode: 0 }, responseTime: (0).toFixed(0), status: "down" };
+          }
+        } else {
+          const result = await curl(site);
+          console.log("Result from test", result.httpCode, result.totalTime);
+          const responseTime = (result.totalTime * 1000).toFixed(0);
+          const expectedStatusCodes = (
+            site.expectedStatusCodes || [
+              200,
+              201,
+              202,
+              203,
+              200,
+              204,
+              205,
+              206,
+              207,
+              208,
+              226,
+              300,
+              301,
+              302,
+              303,
+              304,
+              305,
+              306,
+              307,
+              308,
+            ]
+          ).map(Number);
+          let status: "up" | "down" | "degraded" = expectedStatusCodes.includes(
+            Number(result.httpCode)
+          )
+            ? "up"
+            : "down";
+          if (parseInt(responseTime) > (site.maxResponseTime || 60000)) status = "degraded";
+          if (status === "up" && typeof result.data === "string") {
+            if (site.__dangerous__body_down && result.data.includes(site.__dangerous__body_down))
+              status = "down";
+            if (
+              site.__dangerous__body_degraded &&
+              result.data.includes(site.__dangerous__body_degraded)
+            )
+              status = "degraded";
+          }
           if (
-            site.__dangerous__body_degraded &&
-            result.data.includes(site.__dangerous__body_degraded)
+            site.__dangerous__body_degraded_if_text_missing &&
+            !result.data.includes(site.__dangerous__body_degraded_if_text_missing)
           )
             status = "degraded";
+          if (
+            site.__dangerous__body_down_if_text_missing &&
+            !result.data.includes(site.__dangerous__body_down_if_text_missing)
+          )
+            status = "down";
+          return { result, responseTime, status };
         }
-        if (
-          site.__dangerous__body_degraded_if_text_missing &&
-          !result.data.includes(site.__dangerous__body_degraded_if_text_missing)
-        )
-          status = "degraded";
-        if (
-          site.__dangerous__body_down_if_text_missing &&
-          !result.data.includes(site.__dangerous__body_down_if_text_missing)
-        )
-          status = "down";
-        return { result, responseTime, status };
-      }
-    };
+      };
 
-    let { result, responseTime, status } = await performTestOnce();
-    /**
-     * If the site is down, we perform the test 2 more times to make
-     * sure that it's not a false alarm
-     */
-    if (status === "down" || status === "degraded") {
-      wait(1000);
-      const secondTry = await performTestOnce();
-      if (secondTry.status === "up") {
-        result = secondTry.result;
-        responseTime = secondTry.responseTime;
-        status = secondTry.status;
-      } else {
-        wait(10000);
-        const thirdTry = await performTestOnce();
-        if (thirdTry.status === "up") {
-          result = thirdTry.result;
-          responseTime = thirdTry.responseTime;
-          status = thirdTry.status;
+      let { result, responseTime, status } = await performTestOnce();
+      /**
+       * If the site is down, we perform the test 2 more times to make
+       * sure that it's not a false alarm
+       */
+      if (status === "down" || status === "degraded") {
+        wait(1000);
+        const secondTry = await performTestOnce();
+        if (secondTry.status === "up") {
+          result = secondTry.result;
+          responseTime = secondTry.responseTime;
+          status = secondTry.status;
+        } else {
+          wait(10000);
+          const thirdTry = await performTestOnce();
+          if (thirdTry.status === "up") {
+            result = thirdTry.result;
+            responseTime = thirdTry.responseTime;
+            status = thirdTry.status;
+          }
         }
       }
-    }
 
-    try {
-      if (shouldCommit || currentStatus !== status) {
-        await writeFile(
-          join(".", "history", `${slug}.yml`),
-          `url: ${site.url}
+      // tags does not exist -> false
+      // tag  default        -> false
+      // else                -> true
+      if (tags && tag != "default") {
+        exec(`${site.endScript} ${site.name} ${site.url} ${tag}`);
+      }
+
+      try {
+        if (shouldCommit || currentStatus !== status) {
+          await writeFile(
+            join(".", "history", `${slug}.yml`),
+            `url: ${site.url}
 status: ${status}
 code: ${result.httpCode}
 responseTime: ${responseTime}
@@ -221,150 +252,152 @@ lastUpdated: ${new Date().toISOString()}
 startTime: ${startTime}
 generator: Upptime <https://github.com/upptime/upptime>
 `
-        );
-        commit(
-          (
-            (config.commitMessages || {}).statusChange ||
-            "$PREFIX $SITE_NAME is $STATUS ($RESPONSE_CODE in $RESPONSE_TIME ms) [skip ci] [upptime]"
-          )
-            .replace(
-              "$PREFIX",
-              status === "up"
-                ? config.commitPrefixStatusUp || "🟩"
-                : status === "degraded"
-                ? config.commitPrefixStatusDegraded || "🟨"
-                : config.commitPrefixStatusDown || "🟥"
+          );
+          commit(
+            (
+              (config.commitMessages || {}).statusChange ||
+              "$PREFIX $SITE_NAME is $STATUS ($RESPONSE_CODE in $RESPONSE_TIME ms) [skip ci] [upptime]"
             )
-            .replace("$SITE_NAME", site.name)
-            .replace("$SITE_URL", site.url)
-            .replace("$SITE_METHOD", site.method || "GET")
-            .replace("$STATUS", status)
-            .replace("$RESPONSE_CODE", result.httpCode.toString())
-            .replace("$RESPONSE_TIME", responseTime),
-          (config.commitMessages || {}).commitAuthorName,
-          (config.commitMessages || {}).commitAuthorEmail
-        );
-        const lastCommitSha = lastCommit();
+              .replace(
+                "$PREFIX",
+                status === "up"
+                  ? config.commitPrefixStatusUp || "🟩"
+                  : status === "degraded"
+                  ? config.commitPrefixStatusDegraded || "🟨"
+                  : config.commitPrefixStatusDown || "🟥"
+              )
+              .replace("$SITE_NAME", siteName)
+              .replace("$SITE_URL", site.url)
+              .replace("$SITE_METHOD", site.method || "GET")
+              .replace("$STATUS", status)
+              .replace("$RESPONSE_CODE", result.httpCode.toString())
+              .replace("$RESPONSE_TIME", responseTime),
+            (config.commitMessages || {}).commitAuthorName,
+            (config.commitMessages || {}).commitAuthorEmail
+          );
+          const lastCommitSha = lastCommit();
 
-        if (currentStatus !== status) {
-          console.log("Status is different", currentStatus, "to", status);
-          hasDelta = true;
+          if (currentStatus !== status) {
+            console.log("Status is different", currentStatus, "to", status);
+            hasDelta = true;
 
-          const issues = await octokit.issues.listForRepo({
-            owner,
-            repo,
-            labels: slug,
-            filter: "all",
-            state: "open",
-            sort: "created",
-            direction: "desc",
-            per_page: 1,
-          });
-          console.log(`Found ${issues.data.length} issues`);
+            const issues = await octokit.issues.listForRepo({
+              owner,
+              repo,
+              labels: slug,
+              filter: "all",
+              state: "open",
+              sort: "created",
+              direction: "desc",
+              per_page: 1,
+            });
+            console.log(`Found ${issues.data.length} issues`);
 
-          // Don't create an issue if it's expected that the site is down or degraded
-          let expected = false;
-          if (
-            (status === "down" &&
-              ongoingMaintenanceEvents.find((i) => i.metadata.expectedDown.includes(slug))) ||
-            (status === "degraded" &&
-              ongoingMaintenanceEvents.find((i) => i.metadata.expectedDegraded.includes(slug)))
-          )
-            expected = true;
+            // Don't create an issue if it's expected that the site is down or degraded
+            let expected = false;
+            if (
+              (status === "down" &&
+                ongoingMaintenanceEvents.find((i) => i.metadata.expectedDown.includes(slug))) ||
+              (status === "degraded" &&
+                ongoingMaintenanceEvents.find((i) => i.metadata.expectedDegraded.includes(slug)))
+            )
+              expected = true;
 
-          // If the site was just recorded as down or degraded, open an issue
-          if ((status === "down" || status === "degraded") && !expected) {
-            if (!issues.data.length) {
-              const newIssue = await octokit.issues.create({
-                owner,
-                repo,
-                title:
-                  status === "down"
-                    ? `🛑 ${site.name} is down`
-                    : `⚠️ ${site.name} has degraded performance`,
-                body: `In [\`${lastCommitSha.substr(
-                  0,
-                  7
-                )}\`](https://github.com/${owner}/${repo}/commit/${lastCommitSha}), ${site.name} (${
-                  site.url
-                }) ${status === "down" ? "was **down**" : "experienced **degraded performance**"}:
+            // If the site was just recorded as down or degraded, open an issue
+            if ((status === "down" || status === "degraded") && !expected) {
+              if (!issues.data.length) {
+                const newIssue = await octokit.issues.create({
+                  owner,
+                  repo,
+                  title:
+                    status === "down"
+                      ? `🛑 ${siteName} is down`
+                      : `⚠️ ${siteName} has degraded performance`,
+                  body: `In [\`${lastCommitSha.substr(
+                    0,
+                    7
+                  )}\`](https://github.com/${owner}/${repo}/commit/${lastCommitSha}), ${siteName} (${
+                    site.url
+                  }) ${status === "down" ? "was **down**" : "experienced **degraded performance**"}:
 - HTTP code: ${result.httpCode}
 - Response time: ${responseTime} ms
 `,
-                labels: ["status", slug],
-              });
-              const assignees = [...(config.assignees || []), ...(site.assignees || [])];
-              await octokit.issues.addAssignees({
+                  labels: ["status", slug],
+                });
+                const assignees = [...(config.assignees || []), ...(site.assignees || [])];
+                await octokit.issues.addAssignees({
+                  owner,
+                  repo,
+                  issue_number: newIssue.data.number,
+                  assignees,
+                });
+                await octokit.issues.lock({
+                  owner,
+                  repo,
+                  issue_number: newIssue.data.number,
+                });
+                console.log("Opened and locked a new issue");
+                try {
+                  await sendNotification(
+                    status === "down"
+                      ? `🟥 ${siteName} (${site.url}) is **down**: ${newIssue.data.html_url}`
+                      : `🟨 ${siteName} (${site.url}) is experiencing **degraded performance**: ${newIssue.data.html_url}`
+                  );
+                } catch (error) {
+                  console.log(error);
+                }
+              } else {
+                console.log("An issue is already open for this");
+              }
+            } else if (issues.data.length) {
+              // If the site just came back up
+              await octokit.issues.createComment({
                 owner,
                 repo,
-                issue_number: newIssue.data.number,
-                assignees,
+                issue_number: issues.data[0].number,
+                body: `**Resolved:** ${siteName} ${
+                  issues.data[0].title.includes("degraded")
+                    ? "performance has improved"
+                    : "is back up"
+                } in [\`${lastCommitSha.substr(
+                  0,
+                  7
+                )}\`](https://github.com/${owner}/${repo}/commit/${lastCommitSha}).`,
               });
-              await octokit.issues.lock({
+              console.log("Created comment in issue");
+              await octokit.issues.update({
                 owner,
                 repo,
-                issue_number: newIssue.data.number,
+                issue_number: issues.data[0].number,
+                state: "closed",
               });
-              console.log("Opened and locked a new issue");
+              console.log("Closed issue");
               try {
                 await sendNotification(
-                  status === "down"
-                    ? `🟥 ${site.name} (${site.url}) is **down**: ${newIssue.data.html_url}`
-                    : `🟨 ${site.name} (${site.url}) is experiencing **degraded performance**: ${newIssue.data.html_url}`
+                  `🟩 ${siteName} (${site.url}) ${
+                    issues.data[0].title.includes("degraded")
+                      ? "performance has improved"
+                      : "is back up"
+                  }.`
                 );
               } catch (error) {
                 console.log(error);
               }
             } else {
-              console.log("An issue is already open for this");
-            }
-          } else if (issues.data.length) {
-            // If the site just came back up
-            await octokit.issues.createComment({
-              owner,
-              repo,
-              issue_number: issues.data[0].number,
-              body: `**Resolved:** ${site.name} ${
-                issues.data[0].title.includes("degraded")
-                  ? "performance has improved"
-                  : "is back up"
-              } in [\`${lastCommitSha.substr(
-                0,
-                7
-              )}\`](https://github.com/${owner}/${repo}/commit/${lastCommitSha}).`,
-            });
-            console.log("Created comment in issue");
-            await octokit.issues.update({
-              owner,
-              repo,
-              issue_number: issues.data[0].number,
-              state: "closed",
-            });
-            console.log("Closed issue");
-            try {
-              await sendNotification(
-                `🟩 ${site.name} (${site.url}) ${
-                  issues.data[0].title.includes("degraded")
-                    ? "performance has improved"
-                    : "is back up"
-                }.`
-              );
-            } catch (error) {
-              console.log(error);
+              console.log("Could not find a relevant issue", issues.data);
             }
           } else {
-            console.log("Could not find a relevant issue", issues.data);
+            console.log("Status is the same", currentStatus, status);
           }
         } else {
-          console.log("Status is the same", currentStatus, status);
+          console.log("Skipping commit, ", "status is", status);
         }
-      } else {
-        console.log("Skipping commit, ", "status is", status);
+      } catch (error) {
+        console.log("ERROR", error);
       }
-    } catch (error) {
-      console.log("ERROR", error);
     }
   }
+
   push();
 
   if (hasDelta) generateSummary();

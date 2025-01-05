@@ -7,6 +7,7 @@ import { generateSummary } from "./summary";
 import { update } from "./update";
 import { updateTemplate } from "./update-template";
 
+
 const token = getSecret("GH_PAT") || getInput("token") || getSecret("GITHUB_TOKEN");
 const SECRETS_CONTEXT = process.env.SECRETS_CONTEXT || "{}";
 const allSecrets: Record<string, string> = JSON.parse(SECRETS_CONTEXT);
@@ -23,7 +24,7 @@ export const run = async () => {
     case "summary":
       debug("Starting summary");
     case "readme":
-      debug("Starting readme");
+      console.log("Entering readme");
       return generateSummary();
     case "site":
       debug("Starting site");
@@ -32,16 +33,19 @@ export const run = async () => {
       debug("Starting site");
       return generateGraphs();
     case "response-time":
+      console.log("Entering response time");
       debug("Starting response-time");
       return update(true);
     case "update-dependencies":
       debug("Starting update-dependencies");
       return updateDependencies();
     case "update-template":
+      console.log("Entering update template");
       debug("Starting update-template");
       return updateTemplate();
     default:
       debug("Starting update");
+      console.log("Entering default");
       return update();
   }
 };

@@ -5,6 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
+    "sed": "sed -i '1s/^/#!\\/usr\\/bin\\/env node\\n/' dist/index.js",
     "package": "ncc build --source-map",
     "test": "jest"
   },
