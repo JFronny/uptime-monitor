@@ -189,6 +189,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: \${{ github.head_ref }}
+          token: \${{ secrets.USER_PAT }}
       - name: Update template
         uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
@@ -315,6 +316,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: \${{ github.head_ref }}
+          token: \${{ secrets.USER_PAT }}
       - name: Update template
         uses: JFronny/uptime-monitor@master
         with:
