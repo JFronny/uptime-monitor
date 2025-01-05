@@ -6,6 +6,7 @@ import { mkdirp, readFile, writeFile } from "fs-extra";
 import { load } from "js-yaml";
 import { join } from "path";
 import WebSocket from "ws";
+import { exec } from "shelljs";
 import { getConfig } from "./helpers/config";
 import { replaceEnvironmentVariables } from "./helpers/environment";
 import { commit, lastCommit, push } from "./helpers/git";
@@ -335,6 +336,13 @@ export const update = async (shouldCommit = false) => {
       }
     };
 
+    if (site.startScript) {
+      const result = exec(site.startScript)
+      if (result.code != 0) {
+        console.log("Error running start script");
+      }
+    }
+
     let { result, responseTime, status } = await performTestOnce();
     /**
      * If the site is down, we perform the test 2 more times to make
@@ -355,6 +363,13 @@ export const update = async (shouldCommit = false) => {
           responseTime = thirdTry.responseTime;
           status = thirdTry.status;
         }
+      }
+    }
+
+    if (site.endScript) {
+      const result = exec(site.endScript)
+      if (result.code != 0) {
+        console.log("Error running end script");
       }
     }
 
