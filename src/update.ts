@@ -228,8 +228,8 @@ export const update = async (shouldCommit = false) => {
               status,
             };
           } catch (error) {
-              console.log("ERROR Got pinging error", error);
-              return { result: { httpCode: 0 }, responseTime: (0).toFixed(0), status: "down" };
+            console.log("ERROR Got pinging error", error);
+            return { result: { httpCode: 0 }, responseTime: (0).toFixed(0), status: "down" };
           }
       } else if (site.check === "ws") {
         console.log("Using websocket check instead of curl");
