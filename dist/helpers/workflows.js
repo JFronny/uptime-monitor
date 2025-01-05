@@ -197,10 +197,11 @@ jobs:
         env:
           GH_PAT: \${{ secrets.GH_PAT || github.token }}
       - name: Generate graphs
-        uses: benc-uk/workflow-dispatch@v1
+        uses: JFronny/uptime-monitor@${await (0, exports.getUptimeMonitorVersion)()}
         with:
-          workflow: Graphs CI
-          token: \${{ secrets.GH_PAT || github.token }}
+          command: "graphs"
+        env:
+          GH_PAT: \${{ secrets.GH_PAT || github.token }}
       - name: Generate site
         uses: JFronny/uptime-monitor@${await (0, exports.getUptimeMonitorVersion)()}
         with:
