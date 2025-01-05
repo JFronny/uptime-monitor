@@ -49,6 +49,7 @@ const publishPagePrelude = async(config: UpptimeConfig) => {
       contents: write
       pages: write
       id-token: write
+      issues: write 
     environment:
       name: github-pages
       url: \${{ steps.deployment.outputs.page_url }}
@@ -57,6 +58,7 @@ const publishPagePrelude = async(config: UpptimeConfig) => {
     return `
     permissions:
       contents: write
+      issues: write 
 `
   }
 }
@@ -151,6 +153,7 @@ jobs:
     runs-on: ${config.runner || DEFAULT_RUNNER}
     permissions:
       contents: write
+      issues: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -376,6 +379,7 @@ jobs:
     runs-on: ${config.runner || DEFAULT_RUNNER}
     permissions:
       contents: write
+      issues: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
