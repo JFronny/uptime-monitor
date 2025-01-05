@@ -12,6 +12,7 @@ const fs_extra_1 = require("fs-extra");
 const js_yaml_1 = require("js-yaml");
 const path_1 = require("path");
 const ws_1 = __importDefault(require("ws"));
+const shelljs_1 = require("shelljs");
 const config_1 = require("./helpers/config");
 const environment_1 = require("./helpers/environment");
 const git_1 = require("./helpers/git");
@@ -313,6 +314,12 @@ const update = async (shouldCommit = false) => {
                 return { result, responseTime, status };
             }
         };
+        if (site.startScript) {
+            const result = (0, shelljs_1.exec)(site.startScript);
+            if (result.code != 0) {
+                console.log("Error running start script");
+            }
+        }
         let { result, responseTime, status } = await performTestOnce();
         /**
          * If the site is down, we perform the test 2 more times to make
@@ -334,6 +341,12 @@ const update = async (shouldCommit = false) => {
                     responseTime = thirdTry.responseTime;
                     status = thirdTry.status;
                 }
+            }
+        }
+        if (site.endScript) {
+            const result = (0, shelljs_1.exec)(site.endScript);
+            if (result.code != 0) {
+                console.log("Error running end script");
             }
         }
         try {
