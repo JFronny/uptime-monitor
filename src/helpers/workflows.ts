@@ -1,3 +1,4 @@
+import { UpptimeConfig } from "../interfaces";
 import { getConfig } from "./config";
 import {
   DEFAULT_RUNNER,
@@ -11,12 +12,12 @@ import {
 } from "./constants";
 import { getOctokit } from "./github";
 
-let release: string | undefined = undefined;
+let release: string | undefined = "master" // undefined;
 export const getUptimeMonitorVersion = async () => {
   if (release) return release;
   const octokit = await getOctokit();
   const releases = await octokit.repos.listReleases({
-    owner: "upptime",
+    owner: "JFronny",
     repo: "uptime-monitor",
     per_page: 1,
   });
@@ -39,6 +40,35 @@ const introComment = async () => `#
 # * Docs and more: https://upptime.js.org
 # * More by Anand Chowdhary: https://anandchowdhary.com
 `;
+
+const publishPage = async(config: UpptimeConfig) => {
+  const commitMessages = config.commitMessages || {};
+  const statusWebsite = config["status-website"] || {};
+  if (statusWebsite.actions || false) {
+    return `
+      - uses: actions/configure-pages@v5
+        name: Setup Pages
+      - uses: actions/upload-pages-artifact@v3
+        name: Upload Pages artifact
+        with:
+          path: "site/status-page/__sapper__/export/"
+      - uses: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4
+    `
+  } else {
+    return `
+      - uses: peaceiris/actions-gh-pages@v4
+        name: GitHub Pages Deploy
+        with:
+          github_token: \${{ secrets.GH_PAT || github.token }}
+          publish_dir: "site/status-page/__sapper__/export/"
+          force_orphan: "${statusWebsite.singleCommit || false}"
+          user_name: "${commitMessages.commitAuthorName || "Upptime Bot"}"
+          user_email: "${
+            commitMessages.commitAuthorEmail || "73812536+upptime-bot@users.noreply.github.com"
+          }"`
+  }
+}
 
 export const graphsCiWorkflow = async () => {
   const config = await getConfig();
@@ -64,7 +94,7 @@ jobs:
           ref: \${{ github.head_ref }}
           token: \${{ secrets.GH_PAT || github.token }}
       - name: Generate graphs
-        uses: upptime/uptime-monitor@${await getUptimeMonitorVersion()}
+        uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
           command: "graphs"
         env:
@@ -105,7 +135,7 @@ jobs:
           ref: \${{ github.head_ref }}
           token: \${{ secrets.GH_PAT || github.token }}
       - name: Update response time
-        uses: upptime/uptime-monitor@${await getUptimeMonitorVersion()}
+        uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
           command: "response-time"
         env:
@@ -116,8 +146,6 @@ jobs:
 
 export const setupCiWorkflow = async () => {
   const config = await getConfig();
-  const commitMessages = config.commitMessages || {};
-  const statusWebsite = config["status-website"] || {};
 
   return `${await introComment()}
 
@@ -133,6 +161,10 @@ jobs:
   release:
     name: Setup Upptime
     runs-on: ${config.runner || DEFAULT_RUNNER}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -140,20 +172,20 @@ jobs:
           ref: \${{ github.head_ref }}
           token: \${{ secrets.GH_PAT || github.token }}
       - name: Update template
-        uses: upptime/uptime-monitor@${await getUptimeMonitorVersion()}
+        uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
           command: "update-template"
         env:
           GH_PAT: \${{ secrets.GH_PAT || github.token }}
       - name: Update response time
-        uses: upptime/uptime-monitor@${await getUptimeMonitorVersion()}
+        uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
           command: "response-time"
         env:
           GH_PAT: \${{ secrets.GH_PAT || github.token }}
           SECRETS_CONTEXT: \${{ toJson(secrets) }}
       - name: Update summary in README
-        uses: upptime/uptime-monitor@${await getUptimeMonitorVersion()}
+        uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
           command: "readme"
         env:
@@ -164,29 +196,18 @@ jobs:
           workflow: Graphs CI
           token: \${{ secrets.GH_PAT || github.token }}
       - name: Generate site
-        uses: upptime/uptime-monitor@${await getUptimeMonitorVersion()}
+        uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
           command: "site"
         env:
           GH_PAT: \${{ secrets.GH_PAT || github.token }}
-      - uses: peaceiris/actions-gh-pages@v4
-        name: GitHub Pages Deploy
-        with:
-          github_token: \${{ secrets.GH_PAT || github.token }}
-          publish_dir: "site/status-page/__sapper__/export/"
-          force_orphan: "${statusWebsite.singleCommit || false}"
-          user_name: "${commitMessages.commitAuthorName || "Upptime Bot"}"
-          user_email: "${
-            commitMessages.commitAuthorEmail || "73812536+upptime-bot@users.noreply.github.com"
-          }"
+${await publishPage(config)}"
 `;
 };
 
 export const siteCiWorkflow = async () => {
   const config = await getConfig();
   const workflowSchedule = config.workflowSchedule || {};
-  const commitMessages = config.commitMessages || {};
-  const statusWebsite = config["status-website"] || {};
 
   return `${await introComment()}
 
@@ -201,6 +222,10 @@ jobs:
   release:
     name: Build and deploy site
     runs-on: ${config.runner || DEFAULT_RUNNER}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     steps:
       - name: Checkout
@@ -209,21 +234,12 @@ jobs:
           ref: \${{ github.head_ref }}
           token: \${{ secrets.GH_PAT || github.token }}
       - name: Generate site
-        uses: upptime/uptime-monitor@${await getUptimeMonitorVersion()}
+        uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
           command: "site"
         env:
           GH_PAT: \${{ secrets.GH_PAT || github.token }}
-      - uses: peaceiris/actions-gh-pages@v4
-        name: GitHub Pages Deploy
-        with:
-          github_token: \${{ secrets.GH_PAT || github.token }}
-          publish_dir: "site/status-page/__sapper__/export/"
-          force_orphan: "${statusWebsite.singleCommit || false}"
-          user_name: "${commitMessages.commitAuthorName || "Upptime Bot"}"
-          user_email: "${
-            commitMessages.commitAuthorEmail || "73812536+upptime-bot@users.noreply.github.com"
-          }"
+${await publishPage(config)}"
 `;
 };
 
@@ -251,7 +267,7 @@ jobs:
           ref: \${{ github.head_ref }}
           token: \${{ secrets.GH_PAT || github.token }}
       - name: Update summary in README
-        uses: upptime/uptime-monitor@${await getUptimeMonitorVersion()}
+        uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
           command: "readme"
         env:
@@ -283,7 +299,7 @@ jobs:
           ref: \${{ github.head_ref }}
           token: \${{ secrets.GH_PAT || github.token }}
       - name: Update template
-        uses: upptime/uptime-monitor@master
+        uses: JFronny/uptime-monitor@master
         with:
           command: "update-template"
         env:
@@ -345,7 +361,7 @@ jobs:
           ref: \${{ github.head_ref }}
           token: \${{ secrets.GH_PAT || github.token }}
       - name: Check endpoint status
-        uses: upptime/uptime-monitor@${await getUptimeMonitorVersion()}
+        uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
           command: "update"
         env:
