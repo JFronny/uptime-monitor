@@ -33,6 +33,24 @@ const introComment = async () => `#
 # * Docs and more: https://upptime.js.org
 # * More by Anand Chowdhary: https://anandchowdhary.com
 `;
+const publishPagePrelude = async (config) => {
+    const statusWebsite = config["status-website"] || {};
+    if (statusWebsite.actions || false) {
+        return `
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: \${{ steps.deployment.outputs.page_url }}
+`;
+    }
+    else {
+        return `
+`;
+    }
+};
 const publishPage = async (config) => {
     const commitMessages = config.commitMessages || {};
     const statusWebsite = config["status-website"] || {};
@@ -148,10 +166,7 @@ jobs:
   release:
     name: Setup Upptime
     runs-on: ${config.runner || constants_1.DEFAULT_RUNNER}
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
+    ${await publishPagePrelude(config)}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -188,7 +203,7 @@ jobs:
           command: "site"
         env:
           GH_PAT: \${{ secrets.GH_PAT || github.token }}
-${await publishPage(config)}"
+${await publishPage(config)}
 `;
 };
 exports.setupCiWorkflow = setupCiWorkflow;
@@ -208,10 +223,7 @@ jobs:
   release:
     name: Build and deploy site
     runs-on: ${config.runner || constants_1.DEFAULT_RUNNER}
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
+    ${await publishPagePrelude(config)}
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     steps:
       - name: Checkout
@@ -225,7 +237,7 @@ jobs:
           command: "site"
         env:
           GH_PAT: \${{ secrets.GH_PAT || github.token }}
-${await publishPage(config)}"
+${await publishPage(config)}
 `;
 };
 exports.siteCiWorkflow = siteCiWorkflow;
