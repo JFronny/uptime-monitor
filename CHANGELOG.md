@@ -1,3 +1,37 @@
+## v1.40.1 (2025-04-09)
+
+[📝 Release notes](https://github.com/upptime/uptime-monitor/releases/tag/v1.40.1) · [💻 Compare](https://github.com/upptime/uptime-monitor/compare/v1.40.0...v1.40.1) · [🔖 Tag](https://github.com/upptime/uptime-monitor/tree/v1.40.1) · 🗄️ Archive ([zip](https://github.com/upptime/uptime-monitor/archive/v1.40.1.zip) · [tar.gz](https://github.com/upptime/uptime-monitor/archive/v1.40.1.tar.gz))
+
+### 🐛 Bug fixes
+
+- [`c7720cc`](https://github.com/upptime/uptime-monitor/commit/c7720cc)  Remove module.exports from ssl-date-checker.ts to align with ES module syntax.
+
+## v1.40.0 (2025-04-08)
+
+[📝 Release notes](https://github.com/upptime/uptime-monitor/releases/tag/v1.40.0) · [💻 Compare](https://github.com/upptime/uptime-monitor/compare/v1.39.0...v1.40.0) · [🔖 Tag](https://github.com/upptime/uptime-monitor/tree/v1.40.0) · 🗄️ Archive ([zip](https://github.com/upptime/uptime-monitor/archive/v1.40.0.zip) · [tar.gz](https://github.com/upptime/uptime-monitor/archive/v1.40.0.tar.gz))
+
+### ✨ New features
+
+- [`1793600`](https://github.com/upptime/uptime-monitor/commit/1793600)  Added SSL checker (if SSL cert expires &lt; 7 days then it fails (#261)
+(Issues: [`#261`](https://github.com/upptime/uptime-monitor/issues/261))
+
+### ♻️ Updates
+
+- [`844cdc9`](https://github.com/upptime/uptime-monitor/commit/844cdc9)  Integrate SSL date checker into update process
+
+### 🐛 Bug fixes
+
+- [`2531655`](https://github.com/upptime/uptime-monitor/commit/2531655)  Ensure expires is a date correctly
+
+## v1.39.0 (2025-02-27)
+
+[📝 Release notes](https://github.com/upptime/uptime-monitor/releases/tag/v1.39.0) · [💻 Compare](https://github.com/upptime/uptime-monitor/compare/v1.38.0...v1.39.0) · [🔖 Tag](https://github.com/upptime/uptime-monitor/tree/v1.39.0) · 🗄️ Archive ([zip](https://github.com/upptime/uptime-monitor/archive/v1.39.0.zip) · [tar.gz](https://github.com/upptime/uptime-monitor/archive/v1.39.0.tar.gz))
+
+### ✨ New features
+
+- [`618e951`](https://github.com/upptime/uptime-monitor/commit/618e951)  Add Gotify as notification option (#256)
+(Issues: [`#256`](https://github.com/upptime/uptime-monitor/issues/256))- [`62a6aba`](https://github.com/upptime/uptime-monitor/commit/62a6aba)  Trigger release
+
 ## v1.38.0 (2024-08-13)
 
 [📝 Release notes](https://github.com/upptime/uptime-monitor/releases/tag/v1.38.0) · [💻 Compare](https://github.com/upptime/uptime-monitor/compare/v1.37.0...v1.38.0) · [🔖 Tag](https://github.com/upptime/uptime-monitor/tree/v1.38.0) · 🗄️ Archive ([zip](https://github.com/upptime/uptime-monitor/archive/v1.38.0.zip) · [tar.gz](https://github.com/upptime/uptime-monitor/archive/v1.38.0.tar.gz))
