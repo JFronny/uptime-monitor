@@ -14,7 +14,6 @@ import { getOctokit } from "./helpers/github";
 import { shouldContinue } from "./helpers/init-check";
 import { sendNotification } from "./helpers/notifme";
 import { ping } from "./helpers/ping";
-import { checkTls } from "./helpers/check-tls";
 import { curl } from "./helpers/request";
 import { getOwnerRepo, getSecret } from "./helpers/secrets";
 import { SiteHistory } from "./interfaces";
