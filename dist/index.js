@@ -318,6 +318,80 @@ exports.getUptimePercentForSite = getUptimePercentForSite;
 
 /***/ }),
 
+/***/ 2739:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.checkTls = void 0;
+const tls_1 = __nccwpck_require__(24404);
+const checkTls = (options) => new Promise((resolve, reject) => {
+    let i = 0;
+    const results = [];
+    const check = () => {
+        if (i < (options.attempts || 10)) {
+            doConnect();
+        }
+        else {
+            resolve({
+                address: options.address || "localhost",
+                port: options.port || 443,
+                attempts: options.attempts || 10,
+                avg: results.reduce((acc, curr) => acc + (curr.time || 0), 0) / results.length,
+                max: results.reduce((acc, curr) => Math.max(acc, curr.time || 0), 0),
+                min: results.reduce((acc, curr) => Math.min(acc, curr.time || 0), Infinity),
+                results: results,
+            });
+        }
+    };
+    const doConnect = () => {
+        const start = process.hrtime();
+        const socket = (0, tls_1.connect)(options.port || 443, options.address, {
+            servername: options.address,
+            rejectUnauthorized: true,
+            //checkServerIdentity: () => undefined,
+        }, () => {
+            const timeArr = process.hrtime(start);
+            results.push({
+                time: (timeArr[0] * 1e9 + timeArr[1]) / 1e6,
+                seq: i,
+            });
+            socket.end();
+            socket.destroy();
+            i++;
+            check();
+        });
+        socket.setTimeout(options.timeout || 5000, () => {
+            results.push({
+                time: undefined,
+                seq: i,
+                err: Error("Request timeout"),
+            });
+            socket.end();
+            socket.destroy();
+            i++;
+            check();
+        });
+        socket.on("error", (error) => {
+            results.push({
+                time: undefined,
+                seq: i,
+                err: error,
+            });
+            socket.end();
+            socket.destroy();
+            i++;
+            check();
+        });
+    };
+    doConnect();
+});
+exports.checkTls = checkTls;
+//# sourceMappingURL=check-tls.js.map
+
+/***/ }),
+
 /***/ 99153:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -1604,70 +1678,6 @@ exports.generateSite = generateSite;
 
 /***/ }),
 
-/***/ 6177:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.checker = void 0;
-// Source: https://github.com/rheh/ssl-date-checker/blob/master/src/Checker.js
-const https_1 = __importDefault(__nccwpck_require__(95687));
-function checkHost(newHost) {
-    if (!newHost) {
-        throw new Error("Invalid host");
-    }
-    return true;
-}
-function checkPort(newPort) {
-    const portVal = newPort || 443;
-    const numericPort = !isNaN(parseFloat(portVal.toString())) && isFinite(portVal);
-    if (numericPort === false) {
-        throw new Error("Invalid port");
-    }
-    return true;
-}
-async function checker(host, port) {
-    if (host === null || port === null) {
-        throw new Error("Invalid host or port");
-    }
-    checkHost(host);
-    checkPort(port);
-    return new Promise((resolve, reject) => {
-        const options = {
-            host,
-            port,
-            method: "GET",
-            rejectUnauthorized: false,
-        };
-        const req = https_1.default.request(options, function (res) {
-            res.on("data", (d) => {
-                // process.stdout.write(d);
-            });
-            const certificateInfo = res.socket.getPeerCertificate();
-            console.log(certificateInfo);
-            const dateInfo = {
-                valid_from: certificateInfo.valid_from,
-                valid_to: certificateInfo.valid_to,
-                serialNumber: certificateInfo.serialNumber,
-                fingerprint: certificateInfo.fingerprint,
-            };
-            resolve(dateInfo);
-        });
-        req.on("error", (e) => {
-            reject(e);
-        });
-        req.end();
-    });
-}
-exports.checker = checker;
-//# sourceMappingURL=ssl-date-checker.js.map
-
-/***/ }),
-
 /***/ 84676:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -2047,9 +2057,9 @@ const github_1 = __nccwpck_require__(38066);
 const init_check_1 = __nccwpck_require__(34689);
 const notifme_1 = __nccwpck_require__(25974);
 const ping_1 = __nccwpck_require__(86692);
+const check_tls_1 = __nccwpck_require__(2739);
 const request_1 = __nccwpck_require__(44439);
 const secrets_1 = __nccwpck_require__(10020);
-const ssl_date_checker_1 = __nccwpck_require__(6177);
 const summary_1 = __nccwpck_require__(84676);
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /**
@@ -2262,27 +2272,27 @@ const update = async (shouldCommit = false) => {
                 }
             }
             else if (site.check === "ssl") {
-                console.log("Using ssl check instead of curl");
-                let success = false;
-                let status = "up";
-                let responseTime = "0";
+                console.log("Using check-tls instead of curl");
                 try {
+                    let status = "up";
+                    // https://github.com/upptime/upptime/discussions/888
                     const url = (0, environment_1.replaceEnvironmentVariables)(site.url);
-                    const port = Number((0, environment_1.replaceEnvironmentVariables)(site.port ? String(site.port) : "443"));
-                    const dateInfo = await (0, ssl_date_checker_1.checker)(url, port);
-                    const expires = new Date(dateInfo.valid_to);
-                    // if it expires 7+ days from now then it's OK
-                    if (!isNaN(expires.getTime()) &&
-                        expires.toString() !== "Invalid Date" &&
-                        expires.getTime() + 604800000 >= Date.now()) {
-                        success = true;
+                    let address = url;
+                    if ((0, net_1.isIP)(url)) {
+                        if (site.ipv6 && !(0, net_1.isIPv6)(url))
+                            throw new Error("Site URL must be IPv6 for ipv6 check");
                     }
-                    if (success) {
-                        status = "up";
-                    }
-                    else {
-                        status = "down";
-                    }
+                    const tcpResult = await (0, check_tls_1.checkTls)({
+                        address,
+                        attempts: 5,
+                        port: Number((0, environment_1.replaceEnvironmentVariables)(site.port ? String(site.port) : "")),
+                    });
+                    if (tcpResult.results.every((result) => Object.prototype.toString.call(result.err) === "[object Error]"))
+                        throw Error("all attempts failed");
+                    console.log("Got result", tcpResult);
+                    let responseTime = (tcpResult.avg || 0).toFixed(0);
+                    if (parseInt(responseTime) > (site.maxResponseTime || 60000))
+                        status = "degraded";
                     return {
                         result: { httpCode: 200 },
                         responseTime,
@@ -2290,7 +2300,7 @@ const update = async (shouldCommit = false) => {
                     };
                 }
                 catch (error) {
-                    console.log("ERROR Got pinging error from async call", error);
+                    console.log("ERROR Got pinging error", error);
                     return { result: { httpCode: 0 }, responseTime: (0).toFixed(0), status: "down" };
                 }
             }

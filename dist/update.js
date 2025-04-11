@@ -20,9 +20,9 @@ const github_1 = require("./helpers/github");
 const init_check_1 = require("./helpers/init-check");
 const notifme_1 = require("./helpers/notifme");
 const ping_1 = require("./helpers/ping");
+const check_tls_1 = require("./helpers/check-tls");
 const request_1 = require("./helpers/request");
 const secrets_1 = require("./helpers/secrets");
-const ssl_date_checker_1 = require("./ssl-date-checker");
 const summary_1 = require("./summary");
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /**
@@ -235,27 +235,27 @@ const update = async (shouldCommit = false) => {
                 }
             }
             else if (site.check === "ssl") {
-                console.log("Using ssl check instead of curl");
-                let success = false;
-                let status = "up";
-                let responseTime = "0";
+                console.log("Using check-tls instead of curl");
                 try {
+                    let status = "up";
+                    // https://github.com/upptime/upptime/discussions/888
                     const url = (0, environment_1.replaceEnvironmentVariables)(site.url);
-                    const port = Number((0, environment_1.replaceEnvironmentVariables)(site.port ? String(site.port) : "443"));
-                    const dateInfo = await (0, ssl_date_checker_1.checker)(url, port);
-                    const expires = new Date(dateInfo.valid_to);
-                    // if it expires 7+ days from now then it's OK
-                    if (!isNaN(expires.getTime()) &&
-                        expires.toString() !== "Invalid Date" &&
-                        expires.getTime() + 604800000 >= Date.now()) {
-                        success = true;
+                    let address = url;
+                    if ((0, net_1.isIP)(url)) {
+                        if (site.ipv6 && !(0, net_1.isIPv6)(url))
+                            throw new Error("Site URL must be IPv6 for ipv6 check");
                     }
-                    if (success) {
-                        status = "up";
-                    }
-                    else {
-                        status = "down";
-                    }
+                    const tcpResult = await (0, check_tls_1.checkTls)({
+                        address,
+                        attempts: 5,
+                        port: Number((0, environment_1.replaceEnvironmentVariables)(site.port ? String(site.port) : "")),
+                    });
+                    if (tcpResult.results.every((result) => Object.prototype.toString.call(result.err) === "[object Error]"))
+                        throw Error("all attempts failed");
+                    console.log("Got result", tcpResult);
+                    let responseTime = (tcpResult.avg || 0).toFixed(0);
+                    if (parseInt(responseTime) > (site.maxResponseTime || 60000))
+                        status = "degraded";
                     return {
                         result: { httpCode: 200 },
                         responseTime,
@@ -263,7 +263,7 @@ const update = async (shouldCommit = false) => {
                     };
                 }
                 catch (error) {
-                    console.log("ERROR Got pinging error from async call", error);
+                    console.log("ERROR Got pinging error", error);
                     return { result: { httpCode: 0 }, responseTime: (0).toFixed(0), status: "down" };
                 }
             }
