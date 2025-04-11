@@ -14,6 +14,7 @@ import { getOctokit } from "./helpers/github";
 import { shouldContinue } from "./helpers/init-check";
 import { sendNotification } from "./helpers/notifme";
 import { ping } from "./helpers/ping";
+import { checkTls } from "./helpers/check-tls";
 import { curl } from "./helpers/request";
 import { getOwnerRepo, getSecret } from "./helpers/secrets";
 import { SiteHistory } from "./interfaces";
@@ -241,35 +242,38 @@ export const update = async (shouldCommit = false) => {
           return { result: { httpCode: 0 }, responseTime: (0).toFixed(0), status: "down" };
         }
       } else if (site.check === "ssl") {
-        console.log("Using ssl check instead of curl");
-        let success = false;
-        let status: "up" | "down" | "degraded" = "up";
-        let responseTime = "0";
+        console.log("Using check-tls instead of curl");
         try {
+          let status: "up" | "down" | "degraded" = "up";
+          // https://github.com/upptime/upptime/discussions/888
           const url = replaceEnvironmentVariables(site.url);
-          const port = Number(replaceEnvironmentVariables(site.port ? String(site.port) : "443"));
-          const dateInfo = await checker(url, port);
-          const expires = new Date(dateInfo.valid_to);
-          // if it expires 7+ days from now then it's OK
+          let address = url;
+          if (isIP(url)) {
+            if (site.ipv6 && !isIPv6(url))
+              throw new Error("Site URL must be IPv6 for ipv6 check");
+          }
+
+          const tcpResult = await checkTls({
+            address,
+            attempts: 5,
+            port: Number(replaceEnvironmentVariables(site.port ? String(site.port) : "")),
+          });
           if (
-            !isNaN(expires.getTime()) &&
-            expires.toString() !== "Invalid Date" &&
-            expires.getTime() + 604800000 >= Date.now()
-          ) {
-            success = true;
-          }
-          if (success) {
-            status = "up";
-          } else {
-            status = "down";
-          }
+            tcpResult.results.every(
+              (result) => Object.prototype.toString.call((result as any).err) === "[object Error]"
+            )
+          )
+            throw Error("all attempts failed");
+          console.log("Got result", tcpResult);
+          let responseTime = (tcpResult.avg || 0).toFixed(0);
+          if (parseInt(responseTime) > (site.maxResponseTime || 60000)) status = "degraded";
           return {
             result: { httpCode: 200 },
             responseTime,
             status,
           };
         } catch (error) {
-          console.log("ERROR Got pinging error from async call", error);
+          console.log("ERROR Got pinging error", error);
           return { result: { httpCode: 0 }, responseTime: (0).toFixed(0), status: "down" };
         }
       } else {
