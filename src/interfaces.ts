@@ -3,6 +3,7 @@ export interface UpptimeConfig {
   repo: string;
   "user-agent"?: string;
   sites: {
+    type?: "local" | "globalping";
     check?: "http" | "tcp-ping" | "ws" | "ssl";
     method?: string;
     name: string;
@@ -19,8 +20,12 @@ export interface UpptimeConfig {
     icon?: string;
     maxResponseTime?: number;
     maxRedirects?: number;
+    maxRetries?: number;
+    connectTimeout?: number;
+    requestTimeout?: number;
     verbose?: boolean;
     ipv6?: boolean;
+    location?: string;
     __dangerous__insecure?: boolean;
     __dangerous__disable_verify_peer?: boolean;
     __dangerous__disable_verify_host?: boolean;
@@ -100,6 +105,7 @@ export interface UpptimeConfig {
   runner?: string;
   customStatusWebsitePackage?: string;
   skipGeneratingWebsite?: boolean;
+  secrets?: string[];
 }
 
 export interface SiteHistory {

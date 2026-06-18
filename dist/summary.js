@@ -1,10 +1,6 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateSummary = void 0;
-const slugify_1 = __importDefault(require("@sindresorhus/slugify"));
+exports.generateSummary = exports.normalizeWorkflowBadges = void 0;
 const fs_extra_1 = require("fs-extra");
 const path_1 = require("path");
 const prettier_1 = require("prettier");
@@ -14,8 +10,34 @@ const config_1 = require("./helpers/config");
 const git_1 = require("./helpers/git");
 const github_1 = require("./helpers/github");
 const init_check_1 = require("./helpers/init-check");
+const slug_1 = require("./helpers/slug");
 const url_1 = require("url");
 const secrets_1 = require("./helpers/secrets");
+const workflowBadges = [
+    { label: "Uptime CI", workflowName: "Uptime%20CI", file: "uptime.yml" },
+    {
+        label: "Response Time CI",
+        workflowName: "Response%20Time%20CI",
+        file: "response-time.yml",
+    },
+    { label: "Graphs CI", workflowName: "Graphs%20CI", file: "graphs.yml" },
+    {
+        label: "Static Site CI",
+        workflowName: "Static%20Site%20CI",
+        file: "site.yml",
+    },
+    { label: "Summary CI", workflowName: "Summary%20CI", file: "summary.yml" },
+];
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const workflowBadgeMarkdown = (owner, repo, badge) => `[![${badge.label}](https://github.com/${owner}/${repo}/workflows/${badge.workflowName}/badge.svg)](https://github.com/${owner}/${repo}/actions/workflows/${badge.file})`;
+const normalizeWorkflowBadges = (readmeContent, owner, repo) => workflowBadges.reduce((content, badge) => {
+    const label = escapeRegExp(badge.label);
+    const workflowName = escapeRegExp(badge.workflowName);
+    const file = escapeRegExp(badge.file);
+    const workflowBadgePattern = new RegExp(String.raw `\[!\[${label}\]\(https:\/\/github\.com\/[^/]+\/[^/]+\/(?:workflows\/${workflowName}|actions\/workflows\/${file})\/badge\.svg\)\]\(https:\/\/github\.com\/[^/]+\/[^/]+\/actions(?:\/workflows\/${file})?(?:\?query=workflow%3A%22[^)]*%22)?\)`, "g");
+    return content.replace(workflowBadgePattern, workflowBadgeMarkdown(owner, repo, badge));
+}, readmeContent);
+exports.normalizeWorkflowBadges = normalizeWorkflowBadges;
 const generateSummary = async () => {
     if (!(await (0, init_check_1.shouldContinue)()))
         return;
@@ -34,7 +56,7 @@ const generateSummary = async () => {
     let numberOfDegraded = 0;
     // Loop through each site and add compute the current status
     for await (const site of config.sites) {
-        const slug = site.slug || (0, slugify_1.default)(site.name);
+        const slug = (0, slug_1.getSiteSlug)(site);
         const uptimes = await (0, calculate_uptime_1.getUptimePercentForSite)(slug);
         console.log("Uptimes", uptimes);
         const responseTimes = await (0, calculate_response_time_1.getResponseTimeForSite)(slug);
@@ -135,7 +157,7 @@ ${config.summaryEndHtmlComment || "<!--end: status pages-->"}${endText}`;
             }
         }
         // Change badges
-        readmeContent = readmeContent.replace(new RegExp("upptime/upptime/(workflows|actions)", "g"), `${config.owner}/${config.repo}/$1`);
+        readmeContent = (0, exports.normalizeWorkflowBadges)(readmeContent, config.owner, config.repo);
         // Add repo description, topics, etc.
         try {
             const repoInfo = await octokit.repos.get({ owner, repo });

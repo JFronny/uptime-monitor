@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.uptimeCiWorkflow = exports.updatesCiWorkflow = exports.updateTemplateCiWorkflow = exports.summaryCiWorkflow = exports.siteCiWorkflow = exports.setupCiWorkflow = exports.responseTimeCiWorkflow = exports.graphsCiWorkflow = exports.getUptimeMonitorVersion = void 0;
+exports.uptimeCiWorkflow = exports.updatesCiWorkflow = exports.updateTemplateCiWorkflow = exports.summaryCiWorkflow = exports.siteCiWorkflow = exports.setupCiWorkflow = exports.responseTimeCiWorkflow = exports.getSecretsContext = exports.graphsCiWorkflow = exports.getUptimeMonitorVersion = void 0;
 const config_1 = require("./config");
 const constants_1 = require("./constants");
 const github_1 = require("./github");
@@ -9,12 +9,32 @@ const getUptimeMonitorVersion = async () => {
     if (release)
         return release;
     const octokit = await (0, github_1.getOctokit)();
-    const releases = await octokit.repos.listReleases({
+    let latestRelease;
+    try {
+        const releases = await octokit.repos.listReleases({
+            owner: "JFronny",
+            repo: "uptime-monitor",
+            per_page: 1,
+        });
+        latestRelease = releases.data[0]?.tag_name;
+    }
+    catch {
+        latestRelease = undefined;
+    }
+    if (latestRelease) {
+        release = latestRelease;
+        return release;
+    }
+    const tags = await octokit.repos.listTags({
         owner: "JFronny",
         repo: "uptime-monitor",
         per_page: 1,
     });
-    release = releases.data[0].tag_name;
+    const latestTag = tags.data[0]?.name;
+    if (!latestTag) {
+        throw new Error("Unable to find a release or tag for upptime/uptime-monitor");
+    }
+    release = latestTag;
     return release;
 };
 exports.getUptimeMonitorVersion = getUptimeMonitorVersion;
@@ -60,9 +80,9 @@ const publishPage = async (config) => {
     const statusWebsite = config["status-website"] || {};
     if (statusWebsite.actions || false) {
         return `
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
         name: Setup Pages
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         name: Upload Pages artifact
         with:
           path: "site/status-page/__sapper__/export/"
@@ -82,6 +102,9 @@ const publishPage = async (config) => {
           user_email: "${commitMessages.commitAuthorEmail || "73812536+upptime-bot@users.noreply.github.com"}"`;
     }
 };
+const concurrencyBlock = `concurrency:
+  group: \${{ github.repository }}-\${{ github.head_ref || github.ref_name }}-upptime
+  cancel-in-progress: false`;
 const graphsCiWorkflow = async () => {
     const config = await (0, config_1.getConfig)();
     const workflowSchedule = config.workflowSchedule || {};
@@ -94,6 +117,7 @@ on:
   repository_dispatch:
     types: [graphs]
   workflow_dispatch:
+${concurrencyBlock}
 jobs:
   release:
     name: Generate graphs
@@ -102,9 +126,9 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
-          ref: \${{ github.head_ref }}
+          ref: \${{ github.head_ref || github.ref_name }}
       - name: Generate graphs
         uses: JFronny/uptime-monitor@${await (0, exports.getUptimeMonitorVersion)()}
         with:
@@ -123,6 +147,32 @@ const getHasIpV6Site = async () => {
         console.log("No IPv6 sites detected, skipping WARP setup step", JSON.stringify(config.sites));
     return hasIpV6;
 };
+const SECRET_NAME_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
+const getSecretsContext = (config) => {
+    if (config.secrets === undefined)
+        return "${{ toJson(secrets) }}";
+    if (!Array.isArray(config.secrets)) {
+        throw new Error("Invalid .upptimerc.yml secrets allowlist: expected a list of GitHub secret names.");
+    }
+    const configuredSecrets = [...new Set(config.secrets)];
+    for (const secret of configuredSecrets) {
+        if (typeof secret !== "string") {
+            throw new Error("Invalid .upptimerc.yml secrets allowlist: expected every secret name to be a string.");
+        }
+        if (!SECRET_NAME_PATTERN.test(secret) || /^GITHUB_/.test(secret)) {
+            throw new Error(`Invalid secret name in .upptimerc.yml secrets allowlist: ${secret}. ` +
+                "GitHub secret names must contain only uppercase letters, numbers, and underscores, " +
+                "must not start with a number, and must not start with GITHUB_.");
+        }
+    }
+    const secretPairs = configuredSecrets
+        .map((secret) => `${JSON.stringify(secret)}:\${{ toJson(secrets.${secret}) }}`)
+        .join(",");
+    // GitHub Actions evaluates expressions inside YAML string scalars, so this
+    // keeps JSON structure static while each allowlisted secret is resolved at runtime.
+    return `'{${secretPairs}}'`;
+};
+exports.getSecretsContext = getSecretsContext;
 const responseTimeCiWorkflow = async () => {
     const config = await (0, config_1.getConfig)();
     const workflowSchedule = config.workflowSchedule || {};
@@ -135,6 +185,7 @@ on:
   repository_dispatch:
     types: [response_time]
   workflow_dispatch:
+${concurrencyBlock}
 jobs:
   release:
     name: Check status
@@ -144,16 +195,16 @@ jobs:
       issues: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
-          ref: \${{ github.head_ref }}
+          ref: \${{ github.head_ref || github.ref_name }}
       - name: Update response time
         uses: JFronny/uptime-monitor@${await (0, exports.getUptimeMonitorVersion)()}
         with:
           command: "response-time"
         env:
           GH_PAT: \${{ github.token }}
-          SECRETS_CONTEXT: \${{ toJson(secrets) }}
+          SECRETS_CONTEXT: ${(0, exports.getSecretsContext)(config)}
 `;
 };
 exports.responseTimeCiWorkflow = responseTimeCiWorkflow;
@@ -169,6 +220,7 @@ on:
   repository_dispatch:
     types: [setup]
   workflow_dispatch:
+${concurrencyBlock}
 jobs:
   release:
     name: Setup Upptime
@@ -176,9 +228,9 @@ jobs:
     ${await publishPagePrelude(config)}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
-          ref: \${{ github.head_ref }}
+          ref: \${{ github.head_ref || github.ref_name }}
           token: \${{ secrets.USER_PAT }}
       - name: Update template
         uses: JFronny/uptime-monitor@${await (0, exports.getUptimeMonitorVersion)()}
@@ -192,7 +244,7 @@ jobs:
           command: "response-time"
         env:
           GH_PAT: \${{ github.token }}
-          SECRETS_CONTEXT: \${{ toJson(secrets) }}
+          SECRETS_CONTEXT: ${(0, exports.getSecretsContext)(config)}
       - name: Update summary in README
         uses: JFronny/uptime-monitor@${await (0, exports.getUptimeMonitorVersion)()}
         with:
@@ -222,11 +274,15 @@ const siteCiWorkflow = async () => {
 
 name: Static Site CI
 on:
+  push:
+    paths:
+      - "assets/**"
   schedule:
     - cron: "${workflowSchedule.staticSite || constants_1.STATIC_SITE_CI_SCHEDULE}"
   repository_dispatch:
     types: [static_site]
   workflow_dispatch:
+${concurrencyBlock}
 jobs:
   release:
     name: Build and deploy site
@@ -235,9 +291,9 @@ jobs:
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
-          ref: \${{ github.head_ref }}
+          ref: \${{ github.head_ref || github.ref_name }}
       - name: Generate site
         uses: JFronny/uptime-monitor@${await (0, exports.getUptimeMonitorVersion)()}
         with:
@@ -260,6 +316,7 @@ on:
   repository_dispatch:
     types: [summary]
   workflow_dispatch:
+${concurrencyBlock}
 jobs:
   release:
     name: Generate README
@@ -268,9 +325,9 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
-          ref: \${{ github.head_ref }}
+          ref: \${{ github.head_ref || github.ref_name }}
       - name: Update summary in README
         uses: JFronny/uptime-monitor@${await (0, exports.getUptimeMonitorVersion)()}
         with:
@@ -292,6 +349,7 @@ on:
   repository_dispatch:
     types: [update_template]
   workflow_dispatch:
+${concurrencyBlock}
 jobs:
   release:
     name: Build
@@ -300,9 +358,9 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
-          ref: \${{ github.head_ref }}
+          ref: \${{ github.head_ref || github.ref_name }}
           token: \${{ secrets.USER_PAT }}
       - name: Update template
         uses: JFronny/uptime-monitor@master
@@ -325,6 +383,7 @@ on:
   repository_dispatch:
     types: [updates]
   workflow_dispatch:
+${concurrencyBlock}
 jobs:
   release:
     name: Deploy updates
@@ -333,9 +392,9 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
-          ref: \${{ github.head_ref }}
+          ref: \${{ github.head_ref || github.ref_name }}
       - name: Update code
         uses: upptime/updates@master
         env:
@@ -355,6 +414,7 @@ on:
   repository_dispatch:
     types: [uptime]
   workflow_dispatch:
+${concurrencyBlock}
 jobs:
   release:
     name: Check status
@@ -364,16 +424,16 @@ jobs:
       issues: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
-          ref: \${{ github.head_ref }}
+          ref: \${{ github.head_ref || github.ref_name }}
       - name: Check endpoint status
         uses: JFronny/uptime-monitor@${await (0, exports.getUptimeMonitorVersion)()}
         with:
           command: "update"
         env:
           GH_PAT: \${{ github.token }}
-          SECRETS_CONTEXT: \${{ toJson(secrets) }}
+          SECRETS_CONTEXT: ${(0, exports.getSecretsContext)(config)}
 `;
 };
 exports.uptimeCiWorkflow = uptimeCiWorkflow;
