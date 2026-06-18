@@ -37,7 +37,7 @@ export const checkTls = (options: Options) => new Promise<Result>((resolve, reje
             check();
         });
 
-        socket.setTimeout(options.timeout || 5000, () => {
+        socket.setTimeout(options.timeout || 4000, () => {
             results.push({
                 time: undefined,
                 seq: i,
