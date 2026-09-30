@@ -242,6 +242,7 @@ jobs:
           command: "response-time"
         env:
           GH_PAT: \${{ secrets.GH_PAT || github.token }}
+          # Configure the secret allowlist in .upptimerc.yml; do not edit this workflow directly.
           SECRETS_CONTEXT: ${renderSecretsContext(getWorkflowSecretNames(config))}
       - name: Update summary in README
         uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
@@ -250,10 +251,24 @@ jobs:
         env:
           GH_PAT: \${{ secrets.GH_PAT || github.token }}
       - name: Generate graphs
+        id: dispatch_graphs
         uses: benc-uk/workflow-dispatch@v1
+        continue-on-error: true
         with:
           workflow: Graphs CI
           token: \${{ secrets.GH_PAT || github.token }}
+      - name: Setup Node.js for direct graph generation
+        if: steps.dispatch_graphs.outcome == 'failure'
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+      - name: Generate graphs directly if dispatch fails
+        if: steps.dispatch_graphs.outcome == 'failure'
+        uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
+        with:
+          command: "graphs"
+        env:
+          GH_PAT: \${{ secrets.GH_PAT || github.token }}
       - name: Generate site
         uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:

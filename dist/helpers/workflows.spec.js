@@ -81,54 +81,6 @@ describe("workflow helpers", () => {
         }
         expect(listTags).not.toHaveBeenCalled();
     });
-    it("generates optional GitHub App token support without using secrets in conditions", async () => {
-        const { getConfig, getOctokit, graphsCiWorkflow, responseTimeCiWorkflow, setupCiWorkflow, siteCiWorkflow, summaryCiWorkflow, updateTemplateCiWorkflow, updatesCiWorkflow, uptimeCiWorkflow, } = loadWorkflowHelpers();
-        const listReleases = jest.fn().mockResolvedValue({ data: [{ tag_name: "v1.43.16" }] });
-        getConfig.mockResolvedValue({
-            sites: [{ name: "Example", url: "https://example.com" }],
-            workflowSchedule: {},
-            commitMessages: {},
-            "status-website": {},
-        });
-        getOctokit.mockResolvedValue({
-            repos: { listReleases },
-        });
-        const workflows = await Promise.all([
-            graphsCiWorkflow(),
-            responseTimeCiWorkflow(),
-            setupCiWorkflow(),
-            siteCiWorkflow(),
-            summaryCiWorkflow(),
-            updateTemplateCiWorkflow(),
-            updatesCiWorkflow(),
-            uptimeCiWorkflow(),
-        ]);
-        for (const workflow of workflows) {
-            const parsed = js_yaml_1.default.load(workflow);
-            const steps = parsed.jobs.release.steps;
-            const appTokenStep = steps.find((step) => step.id === "app_token");
-            const clearPrivateKeyStep = steps.find((step) => step.name === "Clear GitHub App private key");
-            expect(parsed.jobs.release.env).toMatchObject({
-                GH_APP_PRIVATE_KEY: "${{ secrets.GH_APP_PRIVATE_KEY }}",
-            });
-            expect(appTokenStep).toMatchObject({
-                name: "Create GitHub App token",
-                if: "${{ vars.GH_APP_ID != '' && env.GH_APP_PRIVATE_KEY != '' }}",
-                uses: "actions/create-github-app-token@v3",
-                with: {
-                    "client-id": "${{ vars.GH_APP_ID }}",
-                    "private-key": "${{ env.GH_APP_PRIVATE_KEY }}",
-                },
-            });
-            expect(clearPrivateKeyStep).toMatchObject({
-                if: "${{ always() }}",
-                shell: "bash",
-                run: 'echo "GH_APP_PRIVATE_KEY=" >> "$GITHUB_ENV"',
-            });
-            expect(workflow).toContain("${{ steps.app_token.outputs.token || secrets.GH_PAT || github.token }}");
-            expect(workflow).not.toMatch(/if: \$\{\{[^\n]*secrets\./);
-        }
-    });
     it("generates the static site workflow for assets changes", async () => {
         const { getConfig, getOctokit, siteCiWorkflow } = loadWorkflowHelpers();
         const listReleases = jest.fn().mockResolvedValue({ data: [{ tag_name: "v1.41.7" }] });
@@ -169,7 +121,7 @@ describe("workflow helpers", () => {
             }),
             expect.objectContaining({
                 name: "Generate graphs",
-                uses: "upptime/uptime-monitor@v1.41.9",
+                uses: "JFronny/uptime-monitor@master",
                 with: { command: "graphs" },
             }),
         ]));
@@ -194,12 +146,13 @@ describe("workflow helpers", () => {
         const setupNodeStep = steps.find((step) => step.name === "Setup Node.js for direct graph generation");
         const fallbackStep = steps.find((step) => step.name === "Generate graphs directly if dispatch fails");
         expect(dispatchStep).toMatchObject({
+            id: "dispatch_graphs",
             name: "Generate graphs",
             uses: "benc-uk/workflow-dispatch@v1",
             "continue-on-error": true,
             with: {
                 workflow: "Graphs CI",
-                token: "${{ steps.app_token.outputs.token || secrets.GH_PAT || github.token }}",
+                token: "${{ secrets.GH_PAT || github.token }}",
             },
         });
         expect(setupNodeStep).toMatchObject({
@@ -211,12 +164,12 @@ describe("workflow helpers", () => {
         });
         expect(fallbackStep).toMatchObject({
             if: "steps.dispatch_graphs.outcome == 'failure'",
-            uses: "upptime/uptime-monitor@v1.41.9",
+            uses: "JFronny/uptime-monitor@master",
             with: {
                 command: "graphs",
             },
             env: {
-                GH_PAT: "${{ steps.app_token.outputs.token || secrets.GH_PAT || github.token }}",
+                GH_PAT: "${{ secrets.GH_PAT || github.token }}",
             },
         });
         expect(steps.indexOf(setupNodeStep)).toBeLessThan(steps.indexOf(fallbackStep));
