@@ -44,6 +44,7 @@ export const updateDependencies = async () => {
   if (`${owner}/${repo}` !== "upptime/upptime") return;
 
   const config = await getConfig();
+  const commitMessages = config.commitMessages || {};
   const octokit = await getOctokit();
 
   let changes = 0;
@@ -72,7 +73,7 @@ export const updateDependencies = async () => {
     const pkgName = pkgOldVersion.split("@")[0];
     for await (const workflow of workflows) {
       let contents = await readFile(join(".", ".github", "workflows", workflow), "utf8");
-      contents = contents.replace(pkgOldVersion, uses[pkgOldVersion]);
+      contents = contents.replaceAll(pkgOldVersion, uses[pkgOldVersion]);
       await writeFile(join(".", ".github", "workflows", workflow), contents);
     }
     if (pkgOldVersion.split("@")[1] !== uses[pkgOldVersion].split("@")[1]) changes++;
@@ -87,9 +88,10 @@ export const updateDependencies = async () => {
         pkgOldVersion.split("@")[1]
       }...${
         uses[pkgOldVersion].split("@")[1]
-      })\n\nSigned-off-by: Anand Chowdhary <github@anandchowdhary.com>`,
-      (config.commitMessages || {}).commitAuthorName,
-      (config.commitMessages || {}).commitAuthorEmail
+      })${commitMessages.signoff ? "" : "\n\nSigned-off-by: Anand Chowdhary <github@anandchowdhary.com>"}`,
+      commitMessages.commitAuthorName,
+      commitMessages.commitAuthorEmail,
+      commitMessages.signoff
     );
   }
   push();

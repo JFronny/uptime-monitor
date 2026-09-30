@@ -1,0 +1,153 @@
+"use strict";
+const mockNotifmeSend = jest.fn();
+const mockNotifmeConstructor = jest.fn();
+jest.mock("notifme-sdk", () => ({
+    __esModule: true,
+    default: jest.fn().mockImplementation((config) => {
+        mockNotifmeConstructor(config);
+        return { send: mockNotifmeSend };
+    }),
+}));
+jest.mock("axios", () => ({
+    __esModule: true,
+    default: {
+        post: jest.fn(),
+    },
+}));
+const originalEnv = process.env;
+const loadNotifme = (secrets) => {
+    jest.resetModules();
+    mockNotifmeSend.mockResolvedValue({ status: "success" });
+    process.env = { ...originalEnv, SECRETS_CONTEXT: JSON.stringify(secrets) };
+    const axios = require("axios").default;
+    axios.post.mockResolvedValue({});
+    const notifme = require("./notifme");
+    return { axios, ...notifme };
+};
+afterEach(() => {
+    process.env = originalEnv;
+    jest.clearAllMocks();
+});
+describe("Slack notifications", () => {
+    it("uses the webhook URL secret without requiring the legacy boolean webhook flag", async () => {
+        const { sendNotification } = loadNotifme({
+            NOTIFICATION_SLACK: "true",
+            NOTIFICATION_SLACK_WEBHOOK_URL: "https://hooks.slack.example/services/T000/B000/secret",
+        });
+        await sendNotification("🟥 My Site is **down**");
+        expect(mockNotifmeConstructor).toHaveBeenCalledWith({
+            channels: {
+                slack: {
+                    providers: [
+                        {
+                            type: "webhook",
+                            webhookUrl: "https://hooks.slack.example/services/T000/B000/secret",
+                        },
+                    ],
+                    multiProviderStrategy: "roundrobin",
+                },
+            },
+        });
+        expect(mockNotifmeSend).toHaveBeenCalledWith({
+            slack: {
+                text: "🟥 My Site is **down**",
+            },
+        });
+    });
+});
+describe("Notifme result handling", () => {
+    it("logs provider result errors instead of reporting successful email delivery", async () => {
+        const { sendNotification } = loadNotifme({
+            NOTIFICATION_EMAIL: "true",
+            NOTIFICATION_EMAIL_FROM: "sender@example.com",
+            NOTIFICATION_EMAIL_TO: "recipient@example.com",
+            NOTIFICATION_EMAIL_SES: "true",
+            NOTIFICATION_EMAIL_SES_ACCESS_KEY_ID: "aws-access-key-id",
+            NOTIFICATION_EMAIL_SES_SECRET_ACCESS_KEY: "aws-secret-access-key",
+            NOTIFICATION_EMAIL_SES_REGION: "eu-west-1",
+        });
+        mockNotifmeSend.mockResolvedValueOnce({
+            status: "error",
+            errors: {
+                email: "403 - SignatureDoesNotMatch",
+            },
+        });
+        const consoleSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
+        await sendNotification("🟩 My Site is back up");
+        const logged = consoleSpy.mock.calls.map((call) => call.join("\n")).join("\n");
+        expect(logged).toContain("Error sending email: 403 - SignatureDoesNotMatch");
+        expect(logged).not.toContain("Success email");
+        consoleSpy.mockRestore();
+    });
+    it("logs webhook errors without dumping axios request configuration", async () => {
+        const { axios, sendNotification } = loadNotifme({
+            NOTIFICATION_TELEGRAM: "true",
+            NOTIFICATION_TELEGRAM_BOT_KEY: "telegram-bot-key",
+            NOTIFICATION_TELEGRAM_CHAT_ID: "12345",
+        });
+        axios.post.mockRejectedValueOnce({
+            message: "Request failed with status code 401",
+            config: {
+                url: "https://api.telegram.org/bottelegram-bot-key/sendMessage",
+            },
+        });
+        const consoleSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
+        await sendNotification("🟥 My Site is **down**");
+        const logged = consoleSpy.mock.calls.map((call) => call.join("\n")).join("\n");
+        expect(logged).toContain("Error sending Telegram: Request failed with status code 401");
+        expect(logged).not.toContain("bottelegram-bot-key");
+        expect(logged).not.toContain("sendMessage");
+        consoleSpy.mockRestore();
+    });
+});
+describe("Telegram notifications", () => {
+    it("formats Upptime's default GitHub-flavored status message for Telegram HTML", async () => {
+        const { axios, sendNotification } = loadNotifme({
+            NOTIFICATION_TELEGRAM: "true",
+            NOTIFICATION_TELEGRAM_BOT_KEY: "telegram-token",
+            NOTIFICATION_TELEGRAM_CHAT_ID: "12345",
+        });
+        await sendNotification("🟥 My_Site (https://example.com/?a=1&b=2) is **down** : https://github.com/o/r/issues/1");
+        expect(axios.post).toHaveBeenCalledWith("https://api.telegram.org/bottelegram-token/sendMessage", {
+            parse_mode: "HTML",
+            disable_web_page_preview: true,
+            chat_id: "12345",
+            text: "🟥 My_Site (https://example.com/?a=1&amp;b=2) is <b>down</b> : https://github.com/o/r/issues/1",
+        });
+    });
+    it("escapes Telegram HTML while preserving converted bold segments", () => {
+        const { formatTelegramHtmlMessage } = loadNotifme({});
+        expect(formatTelegramHtmlMessage("**down <again>** & needs attention")).toBe("<b>down &lt;again&gt;</b> &amp; needs attention");
+    });
+});
+describe("Microsoft Teams notifications", () => {
+    it("sends Adaptive Card payloads for Teams workflow webhooks", async () => {
+        const { axios, sendNotification } = loadNotifme({
+            NOTIFICATION_TEAMS: "true",
+            NOTIFICATION_TEAMS_WEBHOOK_URL: "https://teams.example/webhook",
+        });
+        await sendNotification("🟥 My Site (https://example.com/) is **down** : https://github.com/o/r/issues/1");
+        expect(axios.post).toHaveBeenCalledWith("https://teams.example/webhook", {
+            type: "message",
+            attachments: [
+                {
+                    contentType: "application/vnd.microsoft.card.adaptive",
+                    contentUrl: null,
+                    content: {
+                        $schema: "https://adaptivecards.io/schemas/adaptive-card.json",
+                        type: "AdaptiveCard",
+                        version: "1.2",
+                        body: [
+                            {
+                                type: "TextBlock",
+                                text: "🟥 My Site (https://example.com/) is **down** : https://github.com/o/r/issues/1",
+                                wrap: true,
+                            },
+                        ],
+                    },
+                },
+            ],
+        });
+    });
+});
+//# sourceMappingURL=notifme.spec.js.map

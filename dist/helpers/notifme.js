@@ -3,11 +3,69 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sendNotification = void 0;
+exports.sendNotification = exports.createTeamsAdaptiveCardPayload = exports.formatTelegramHtmlMessage = exports.formatNotificationError = void 0;
 const axios_1 = __importDefault(require("axios"));
 const notifme_sdk_1 = __importDefault(require("notifme-sdk"));
 const environment_1 = require("./environment");
 const secrets_1 = require("./secrets");
+const notifmeChannelLabels = {
+    email: "email",
+    sms: "SMS",
+    slack: "Slack",
+};
+const formatNotificationError = (error) => {
+    if (error instanceof Error)
+        return error.message;
+    if (typeof error === "string")
+        return error;
+    if (error && typeof error === "object" && "message" in error) {
+        const message = error.message;
+        if (typeof message === "string")
+            return message;
+    }
+    return String(error);
+};
+exports.formatNotificationError = formatNotificationError;
+const logNotificationError = (channel, error) => {
+    console.log(`Error sending ${channel}: ${(0, exports.formatNotificationError)(error)}`);
+};
+const logNotifmeSendResult = (channel, result) => {
+    const label = notifmeChannelLabels[channel];
+    if (result?.status === "error") {
+        logNotificationError(label, result.errors?.[channel] || result.errors || result);
+        return false;
+    }
+    console.log(`Success ${label}`);
+    return true;
+};
+const formatTelegramHtmlMessage = (message) => message
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\*\*([\s\S]*?)\*\*/g, "<b>$1</b>");
+exports.formatTelegramHtmlMessage = formatTelegramHtmlMessage;
+const createTeamsAdaptiveCardPayload = (message) => ({
+    type: "message",
+    attachments: [
+        {
+            contentType: "application/vnd.microsoft.card.adaptive",
+            contentUrl: null,
+            content: {
+                $schema: "https://adaptivecards.io/schemas/adaptive-card.json",
+                type: "AdaptiveCard",
+                version: "1.2",
+                body: [
+                    {
+                        type: "TextBlock",
+                        text: message,
+                        wrap: true,
+                    },
+                ],
+            },
+        },
+    ],
+});
+exports.createTeamsAdaptiveCardPayload = createTeamsAdaptiveCardPayload;
 const channels = {};
 if ((0, secrets_1.getSecret)("NOTIFICATION_EMAIL_SENDGRID") ||
     (0, secrets_1.getSecret)("NOTIFICATION_EMAIL_SES") ||
@@ -133,18 +191,18 @@ if ((0, secrets_1.getSecret)("NOTIFICATION_SMS_46ELKS") ||
         });
     }
 }
-if ((0, secrets_1.getSecret)("NOTIFICATION_SLACK")) {
+const slackWebhookUrl = (0, secrets_1.getSecret)("NOTIFICATION_SLACK_WEBHOOK_URL");
+if ((0, secrets_1.getSecret)("NOTIFICATION_SLACK") && slackWebhookUrl) {
     channels.slack = {
-        providers: [],
+        providers: [
+            {
+                type: "webhook",
+                webhookUrl: slackWebhookUrl,
+            },
+        ],
         multiProviderStrategy: (0, secrets_1.getSecret)("NOTIFICATION_SLACK_STRATEGY") ||
             "roundrobin",
     };
-    if ((0, secrets_1.getSecret)("NOTIFICATION_SLACK_WEBHOOK")) {
-        channels.slack.providers.push({
-            type: "webhook",
-            webhookUrl: (0, secrets_1.getSecret)("NOTIFICATION_SLACK_WEBHOOK_URL"),
-        });
-    }
 }
 const notifier = new notifme_sdk_1.default({
     channels,
@@ -155,7 +213,7 @@ const sendNotification = async (message) => {
     if (channels.email) {
         console.log("Sending email");
         try {
-            await notifier.send({
+            const result = await notifier.send({
                 email: {
                     from: ((0, secrets_1.getSecret)("NOTIFICATION_EMAIL_FROM") || (0, secrets_1.getSecret)("NOTIFICATION_EMAIL")),
                     to: ((0, secrets_1.getSecret)("NOTIFICATION_EMAIL_TO") || (0, secrets_1.getSecret)("NOTIFICATION_EMAIL")),
@@ -163,10 +221,10 @@ const sendNotification = async (message) => {
                     html: message,
                 },
             });
-            console.log("Success email");
+            logNotifmeSendResult("email", result);
         }
         catch (error) {
-            console.log("Got an error", error);
+            logNotificationError("email", error);
         }
         console.log("Finished sending email");
     }
@@ -175,33 +233,34 @@ const sendNotification = async (message) => {
         try {
             const phoneNumbers = (0, secrets_1.getSecret)("NOTIFICATION_SMS_TO")?.split(",") ?? [];
             for (const phoneNumber of phoneNumbers) {
-                await notifier.send({
+                const result = await notifier.send({
                     sms: {
                         from: (0, secrets_1.getSecret)("NOTIFICATION_SMS_FROM"),
                         to: phoneNumber,
                         text: message,
                     },
                 });
+                if (!logNotifmeSendResult("sms", result))
+                    break;
             }
-            console.log("Success SMS");
         }
         catch (error) {
-            console.log("Got an error", error);
+            logNotificationError("SMS", error);
         }
         console.log("Finished sending SMS");
     }
     if (channels.slack) {
         console.log("Sending Slack");
         try {
-            await notifier.send({
+            const result = await notifier.send({
                 slack: {
                     text: message,
                 },
             });
-            console.log("Success Slack");
+            logNotifmeSendResult("slack", result);
         }
         catch (error) {
-            console.log("Got an error", error);
+            logNotificationError("Slack", error);
         }
         console.log("Finished sending Slack");
     }
@@ -214,7 +273,7 @@ const sendNotification = async (message) => {
             console.log("Success Discord");
         }
         catch (error) {
-            console.log("Got an error", error);
+            logNotificationError("Discord", error);
         }
         console.log("Finished sending Discord");
     }
@@ -227,7 +286,7 @@ const sendNotification = async (message) => {
             console.log("Success Google Chat");
         }
         catch (error) {
-            console.log("Got an error", error);
+            logNotificationError("Google Chat", error);
         }
         console.log("Finished sending Google Chat");
     }
@@ -250,7 +309,7 @@ const sendNotification = async (message) => {
             console.log("Success Zulip");
         }
         catch (error) {
-            console.log("Got an error", error);
+            logNotificationError("Zulip", error);
         }
         console.log("Finished sending Zulip");
     }
@@ -316,16 +375,16 @@ const sendNotification = async (message) => {
             const chatIds = (0, secrets_1.getSecret)("NOTIFICATION_TELEGRAM_CHAT_ID")?.split(",") ?? [];
             for (const chatId of chatIds) {
                 await axios_1.default.post(`https://api.telegram.org/bot${(0, secrets_1.getSecret)("NOTIFICATION_TELEGRAM_BOT_KEY")}/sendMessage`, {
-                    parse_mode: "Markdown",
+                    parse_mode: "HTML",
                     disable_web_page_preview: true,
                     chat_id: chatId.trim(),
-                    text: message.replace(/_/g, '\\_'),
+                    text: (0, exports.formatTelegramHtmlMessage)(message),
                 });
             }
             console.log("Success Telegram");
         }
         catch (error) {
-            console.log("Got an error", error);
+            logNotificationError("Telegram", error);
         }
         console.log("Finished sending Telegram");
     }
@@ -349,24 +408,18 @@ const sendNotification = async (message) => {
             console.log("Success Lark");
         }
         catch (error) {
-            console.log("Got an error", error);
+            logNotificationError("Lark", error);
         }
         console.log("Finished sending Lark");
     }
     if ((0, secrets_1.getSecret)("NOTIFICATION_TEAMS")) {
         console.log("Sending Microsoft Teams");
         try {
-            await axios_1.default.post(`${(0, secrets_1.getSecret)("NOTIFICATION_TEAMS_WEBHOOK_URL")}`, {
-                "@context": "https://schema.org/extensions",
-                "@type": "MessageCard",
-                themeColor: "0072C6",
-                text: message,
-                summary: message
-            });
+            await axios_1.default.post(`${(0, secrets_1.getSecret)("NOTIFICATION_TEAMS_WEBHOOK_URL")}`, (0, exports.createTeamsAdaptiveCardPayload)(message));
             console.log("Success Microsoft Teams");
         }
         catch (error) {
-            console.log("Got an error", error);
+            logNotificationError("Microsoft Teams", error);
         }
         console.log("Finished sending Microsoft Teams");
     }
@@ -385,7 +438,7 @@ const sendNotification = async (message) => {
             console.log("Success Webhook");
         }
         catch (error) {
-            console.log("Got an error", error);
+            logNotificationError("Webhook", error);
         }
         console.log("Finished sending Webhook");
     }
@@ -400,7 +453,7 @@ const sendNotification = async (message) => {
             console.log("Success Gotify");
         }
         catch (error) {
-            console.log("Got an error", error);
+            logNotificationError("Gotify", error);
         }
         console.log("Finished sending Gotify");
     }

@@ -67,6 +67,7 @@ export interface UpptimeConfig {
         graphsUpdate?: string;
         commitAuthorName?: string;
         commitAuthorEmail?: string;
+        signoff?: boolean;
     };
     summaryStartHtmlComment?: string;
     summaryEndHtmlComment?: string;
@@ -111,6 +112,11 @@ export interface UpptimeConfig {
     runner?: string;
     customStatusWebsitePackage?: string;
     skipGeneratingWebsite?: boolean;
+    /**
+     * Exact contextual secret allowlist. When omitted, Upptime uses automatic
+     * compatibility mode. When present (including an empty list), it is
+     * authoritative. GH_PAT is provided separately by generated workflows.
+     */
     secrets?: string[];
 }
 export interface SiteHistory {

@@ -11,6 +11,7 @@ import {
   UPTIME_CI_SCHEDULE,
 } from "./constants";
 import { getOctokit } from "./github";
+import { getWorkflowSecretNames, renderSecretsContext } from "./workflow-secrets";
 
 let release: string | undefined = "master" // undefined;
 export const getUptimeMonitorVersion = async () => {
@@ -143,6 +144,10 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: \${{ github.head_ref || github.ref_name }}
+      - name: Setup Node.js for graphs
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
       - name: Generate graphs
         uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
@@ -159,36 +164,6 @@ const getHasIpV6Site = async (): Promise<boolean> => {
   else
     console.log("No IPv6 sites detected, skipping WARP setup step", JSON.stringify(config.sites));
   return hasIpV6;
-};
-
-const SECRET_NAME_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
-
-export const getSecretsContext = (config: UpptimeConfig): string => {
-  if (config.secrets === undefined) return "${{ toJson(secrets) }}";
-  if (!Array.isArray(config.secrets)) {
-    throw new Error("Invalid .upptimerc.yml secrets allowlist: expected a list of GitHub secret names.");
-  }
-
-  const configuredSecrets = [...new Set(config.secrets)];
-  for (const secret of configuredSecrets) {
-    if (typeof secret !== "string") {
-      throw new Error("Invalid .upptimerc.yml secrets allowlist: expected every secret name to be a string.");
-    }
-    if (!SECRET_NAME_PATTERN.test(secret) || /^GITHUB_/.test(secret)) {
-      throw new Error(
-        `Invalid secret name in .upptimerc.yml secrets allowlist: ${secret}. ` +
-          "GitHub secret names must contain only uppercase letters, numbers, and underscores, " +
-          "must not start with a number, and must not start with GITHUB_."
-      );
-    }
-  }
-
-  const secretPairs = configuredSecrets
-    .map((secret) => `${JSON.stringify(secret)}:\${{ toJson(secrets.${secret}) }}`)
-    .join(",");
-  // GitHub Actions evaluates expressions inside YAML string scalars, so this
-  // keeps JSON structure static while each allowlisted secret is resolved at runtime.
-  return `'{${secretPairs}}'`;
 };
 
 export const responseTimeCiWorkflow = async () => {
@@ -223,12 +198,15 @@ jobs:
           command: "response-time"
         env:
           GH_PAT: \${{ github.token }}
-          SECRETS_CONTEXT: ${getSecretsContext(config)}
+          # Configure the secret allowlist in .upptimerc.yml; do not edit this workflow directly.
+          SECRETS_CONTEXT: ${renderSecretsContext(getWorkflowSecretNames(config))}
 `;
 };
 
 export const setupCiWorkflow = async () => {
   const config = await getConfig();
+  const commitMessages = config.commitMessages || {};
+  const statusWebsite = config["status-website"] || {};
 
   return `${await introComment()}
 
@@ -251,45 +229,55 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: \${{ github.head_ref || github.ref_name }}
-          token: \${{ secrets.USER_PAT }}
+          token: \${{ secrets.GH_PAT || github.token }}
       - name: Update template
         uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
           command: "update-template"
         env:
-          GH_PAT: \${{ secrets.USER_PAT }}
+          GH_PAT: \${{ secrets.GH_PAT || github.token }}
       - name: Update response time
         uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
           command: "response-time"
         env:
-          GH_PAT: \${{ github.token }}
-          SECRETS_CONTEXT: ${getSecretsContext(config)}
+          GH_PAT: \${{ secrets.GH_PAT || github.token }}
+          SECRETS_CONTEXT: ${renderSecretsContext(getWorkflowSecretNames(config))}
       - name: Update summary in README
         uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
           command: "readme"
         env:
-          GH_PAT: \${{ github.token }}
+          GH_PAT: \${{ secrets.GH_PAT || github.token }}
       - name: Generate graphs
-        uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
+        uses: benc-uk/workflow-dispatch@v1
         with:
-          command: "graphs"
-        env:
-          GH_PAT: \${{ github.token }}
+          workflow: Graphs CI
+          token: \${{ secrets.GH_PAT || github.token }}
       - name: Generate site
         uses: JFronny/uptime-monitor@${await getUptimeMonitorVersion()}
         with:
           command: "site"
         env:
-          GH_PAT: \${{ github.token }}
-${await publishPage(config)}
+          GH_PAT: \${{ secrets.GH_PAT || github.token }}
+      - uses: peaceiris/actions-gh-pages@v4
+        name: GitHub Pages Deploy
+        with:
+          github_token: \${{ secrets.GH_PAT || github.token }}
+          publish_dir: "site/status-page/__sapper__/export/"
+          force_orphan: "${statusWebsite.singleCommit || false}"
+          user_name: "${commitMessages.commitAuthorName || "Upptime Bot"}"
+          user_email: "${
+            commitMessages.commitAuthorEmail || "73812536+upptime-bot@users.noreply.github.com"
+          }"
 `;
 };
 
 export const siteCiWorkflow = async () => {
   const config = await getConfig();
   const workflowSchedule = config.workflowSchedule || {};
+  const commitMessages = config.commitMessages || {};
+  const statusWebsite = config["status-website"] || {};
 
   return `${await introComment()}
 
@@ -458,6 +446,7 @@ jobs:
           command: "update"
         env:
           GH_PAT: \${{ github.token }}
-          SECRETS_CONTEXT: ${getSecretsContext(config)}
+          # Configure the secret allowlist in .upptimerc.yml; do not edit this workflow directly.
+          SECRETS_CONTEXT: ${renderSecretsContext(getWorkflowSecretNames(config))}
 `;
 };

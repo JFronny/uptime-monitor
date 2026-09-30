@@ -18,6 +18,7 @@ jest.mock("./helpers/config", () => ({
     getConfig: jest.fn(),
 }));
 jest.mock("./helpers/github", () => ({
+    ...jest.requireActual("./helpers/github"),
     getOctokit: jest.fn(),
 }));
 jest.mock("./helpers/init-check", () => ({
@@ -35,6 +36,9 @@ jest.mock("./helpers/secrets", () => ({
 jest.mock("./helpers/notifme", () => ({
     sendNotification: jest.fn(),
 }));
+jest.mock("./helpers/ping", () => ({
+    ping: jest.fn(),
+}));
 jest.mock("./summary", () => ({
     generateSummary: jest.fn(),
 }));
@@ -43,7 +47,10 @@ const { getConfig } = require("./helpers/config");
 const { getOctokit } = require("./helpers/github");
 const { shouldContinue } = require("./helpers/init-check");
 const { commit, push } = require("./helpers/git");
+const { ping } = require("./helpers/ping");
 const { getOwnerRepo, getSecret } = require("./helpers/secrets");
+const { sendNotification } = require("./helpers/notifme");
+const { generateSummary } = require("./summary");
 describe("update globalping handling", () => {
     const originalCwd = process.cwd();
     let testCwd;
@@ -83,6 +90,21 @@ describe("update globalping handling", () => {
         process.chdir(originalCwd);
         (0, fs_1.rmSync)(testCwd, { recursive: true, force: true });
     });
+    it("retries transient GitHub API failures while loading maintenance events", async () => {
+        getConfig.mockResolvedValue({
+            owner: "owner",
+            repo: "repo",
+            sites: [],
+            assignees: [],
+            workflowSchedule: {},
+        });
+        issueApi.listForRepo
+            .mockRejectedValueOnce({ status: 503 })
+            .mockResolvedValueOnce({ data: [] });
+        await update(false);
+        expect(issueApi.listForRepo).toHaveBeenCalledTimes(2);
+        expect(push).toHaveBeenCalled();
+    });
     it("fails the action instead of recording downtime when Globalping rejects a measurement", async () => {
         mockCreateMeasurement.mockResolvedValue({
             ok: false,
@@ -106,6 +128,137 @@ describe("update globalping handling", () => {
         await expect(update(true)).rejects.toThrow(/Globalping get measurement failed with HTTP 500.*measurement failed/);
         expect(commit).not.toHaveBeenCalled();
         expect(push).not.toHaveBeenCalled();
+    });
+    it("retries a failed Globalping HTTP probe result", async () => {
+        mockCreateMeasurement.mockResolvedValue({
+            ok: true,
+            data: { id: "measurement-id" },
+        });
+        mockAwaitMeasurement
+            .mockResolvedValueOnce({
+            ok: true,
+            data: {
+                results: [
+                    {
+                        result: {
+                            status: "failed",
+                            rawHeaders: "",
+                            rawBody: "",
+                            rawOutput: "The measurement timed out.",
+                            failureSource: "internal",
+                        },
+                    },
+                ],
+            },
+        })
+            .mockResolvedValueOnce({
+            ok: true,
+            data: {
+                results: [
+                    {
+                        result: {
+                            status: "finished",
+                            statusCode: 200,
+                            timings: { total: 123 },
+                            rawBody: "",
+                        },
+                    },
+                ],
+            },
+        });
+        await update(true);
+        expect(mockCreateMeasurement).toHaveBeenCalledTimes(2);
+        expect(mockAwaitMeasurement).toHaveBeenCalledTimes(2);
+        expect((0, fs_1.readFileSync)((0, path_1.join)(testCwd, "history", "blocked-by-globalping.yml"), "utf8")).toContain("status: up");
+    });
+    it("retries a failed Globalping ping probe result", async () => {
+        getConfig.mockResolvedValue({
+            owner: "owner",
+            repo: "repo",
+            sites: [
+                {
+                    name: "Ping target",
+                    url: "example.com",
+                    type: "globalping",
+                    check: "tcp-ping",
+                },
+            ],
+            assignees: [],
+            workflowSchedule: {},
+        });
+        mockCreateMeasurement.mockResolvedValue({
+            ok: true,
+            data: { id: "measurement-id" },
+        });
+        mockAwaitMeasurement
+            .mockResolvedValueOnce({
+            ok: true,
+            data: {
+                results: [
+                    {
+                        result: {
+                            status: "offline",
+                            rawOutput: "Probe disconnected.",
+                        },
+                    },
+                ],
+            },
+        })
+            .mockResolvedValueOnce({
+            ok: true,
+            data: {
+                results: [
+                    {
+                        result: {
+                            status: "finished",
+                            stats: { avg: 12 },
+                        },
+                    },
+                ],
+            },
+        });
+        await update(true);
+        expect(mockCreateMeasurement).toHaveBeenCalledTimes(2);
+        expect(mockAwaitMeasurement).toHaveBeenCalledTimes(2);
+        expect((0, fs_1.readFileSync)((0, path_1.join)(testCwd, "history", "ping-target.yml"), "utf8")).toContain("status: up");
+    });
+    it("omits ipVersion when a Globalping ping target is an IP address", async () => {
+        getConfig.mockResolvedValue({
+            owner: "owner",
+            repo: "repo",
+            sites: [
+                {
+                    name: "IP target",
+                    url: "198.51.100.42",
+                    type: "globalping",
+                    check: "tcp-ping",
+                    location: "Singapore",
+                },
+            ],
+            assignees: [],
+            workflowSchedule: {},
+        });
+        mockCreateMeasurement.mockResolvedValue({
+            ok: true,
+            data: { id: "measurement-id" },
+        });
+        mockAwaitMeasurement.mockResolvedValue({
+            ok: true,
+            data: {
+                results: [
+                    {
+                        result: {
+                            stats: { avg: 12 },
+                        },
+                    },
+                ],
+            },
+        });
+        await update(true);
+        expect(mockCreateMeasurement).toHaveBeenCalledTimes(1);
+        const request = mockCreateMeasurement.mock.calls[0][0];
+        expect(request.target).toBe("198.51.100.42");
+        expect(request).not.toHaveProperty("measurementOptions.ipVersion");
     });
     it("writes history for Unicode-only site names when no explicit slug is set", async () => {
         getConfig.mockResolvedValue({
@@ -143,7 +296,30 @@ describe("update globalping handling", () => {
         const historyPath = (0, path_1.join)(testCwd, "history", "鸭鸭梨.yml");
         expect((0, fs_1.existsSync)(historyPath)).toBe(true);
         expect((0, fs_1.readFileSync)(historyPath, "utf8")).toContain("url: https://example.com");
-        expect(commit).toHaveBeenCalledWith(expect.stringContaining("鸭鸭梨 is up (200 in 123 ms)"), undefined, undefined);
+        expect(commit).toHaveBeenCalledWith(expect.stringContaining("鸭鸭梨 is up (200 in 123 ms)"), undefined, undefined, undefined);
+    });
+    it("waits for summary generation and surfaces its failures", async () => {
+        mockCreateMeasurement.mockResolvedValue({
+            ok: true,
+            data: { id: "measurement-id" },
+        });
+        mockAwaitMeasurement.mockResolvedValue({
+            ok: true,
+            data: {
+                results: [
+                    {
+                        result: {
+                            statusCode: 200,
+                            timings: { total: 123 },
+                            rawBody: "",
+                        },
+                    },
+                ],
+            },
+        });
+        generateSummary.mockRejectedValueOnce(new Error("summary failed"));
+        await expect(update(true)).rejects.toThrow("summary failed");
+        expect(generateSummary).toHaveBeenCalledTimes(1);
     });
     it("supports $EMOJI in custom status change commit messages", async () => {
         getConfig.mockResolvedValue({
@@ -181,7 +357,168 @@ describe("update globalping handling", () => {
             },
         });
         await update(true);
-        expect(commit).toHaveBeenCalledWith("🟩 Custom Commit Site is up (200 in 123 ms) [skip ci] [upptime]\n\nSigned-off-by: Upptime Bot <73812536+upptime-bot@users.noreply.github.com>", undefined, undefined);
+        expect(commit).toHaveBeenCalledWith("🟩 Custom Commit Site is up (200 in 123 ms) [skip ci] [upptime]\n\nSigned-off-by: Upptime Bot <73812536+upptime-bot@users.noreply.github.com>", undefined, undefined, undefined);
+    });
+    it("redacts secret-backed site URLs in notifications", async () => {
+        const oldPrivateUrl = process.env.PRIVATE_STATUS_URL;
+        process.env.PRIVATE_STATUS_URL = "https://private.example/path?session=abc123";
+        (0, fs_1.mkdirSync)((0, path_1.join)(testCwd, "history"));
+        (0, fs_1.writeFileSync)((0, path_1.join)(testCwd, "history", "secret-url.yml"), [
+            "url: $PRIVATE_STATUS_URL",
+            "status: down",
+            "code: 500",
+            "responseTime: 0",
+            "lastUpdated: 2026-01-01T00:00:00.000Z",
+            "startTime: 2026-01-01T00:00:00.000Z",
+            "generator: Upptime <https://github.com/upptime/upptime>",
+        ].join("\n"));
+        getSecret.mockImplementation((key) => key === "GLOBALPING_TOKEN" ? "globalping-token" : undefined);
+        getConfig.mockResolvedValue({
+            owner: "owner",
+            repo: "repo",
+            sites: [
+                {
+                    name: "Secret URL",
+                    url: "$PRIVATE_STATUS_URL",
+                    type: "globalping",
+                },
+            ],
+            assignees: [],
+            workflowSchedule: {},
+        });
+        issueApi.listForRepo
+            .mockResolvedValueOnce({ data: [] })
+            .mockResolvedValueOnce({
+            data: [
+                {
+                    number: 42,
+                    title: "🛑 Secret URL is down",
+                    created_at: "2026-01-01T00:00:00.000Z",
+                },
+            ],
+        });
+        mockCreateMeasurement.mockResolvedValue({
+            ok: true,
+            data: { id: "measurement-id" },
+        });
+        mockAwaitMeasurement.mockResolvedValue({
+            ok: true,
+            data: {
+                results: [
+                    {
+                        result: {
+                            statusCode: 200,
+                            timings: { total: 123 },
+                            rawBody: "",
+                        },
+                    },
+                ],
+            },
+        });
+        try {
+            await update(true);
+        }
+        finally {
+            if (oldPrivateUrl === undefined)
+                delete process.env.PRIVATE_STATUS_URL;
+            else
+                process.env.PRIVATE_STATUS_URL = oldPrivateUrl;
+        }
+        expect(sendNotification).toHaveBeenCalledWith("🟩 Secret URL ([redacted]) is back up");
+        expect(JSON.stringify(sendNotification.mock.calls)).not.toContain("https://private.example/path?session=abc123");
+        expect(JSON.stringify(sendNotification.mock.calls)).not.toContain("$PRIVATE_STATUS_URL");
+    });
+    it("does not log raw tcp-ping endpoints when URL and port come from secrets", async () => {
+        const oldSecretHost = process.env.SECRET_TCP_HOST;
+        const oldSecretPort = process.env.SECRET_TCP_PORT;
+        process.env.SECRET_TCP_HOST = "10.0.0.10";
+        process.env.SECRET_TCP_PORT = "8443";
+        getConfig.mockResolvedValue({
+            owner: "owner",
+            repo: "repo",
+            sites: [
+                {
+                    name: "Secret TCP",
+                    url: "$SECRET_TCP_HOST",
+                    check: "tcp-ping",
+                    port: "$SECRET_TCP_PORT",
+                },
+            ],
+            assignees: [],
+            workflowSchedule: {},
+        });
+        ping.mockResolvedValue({
+            address: "10.0.0.10",
+            port: 8443,
+            attempts: 5,
+            avg: 12.4,
+            max: 15,
+            min: 10,
+            results: [{ seq: 1, time: 12.4 }],
+        });
+        const logSpy = jest.spyOn(console, "log").mockImplementation(() => { });
+        const errorSpy = jest.spyOn(console, "error").mockImplementation(() => { });
+        let serializedLogs = "";
+        try {
+            await update(false);
+            serializedLogs = [...logSpy.mock.calls, ...errorSpy.mock.calls]
+                .map((args) => args.map((arg) => (typeof arg === "string" ? arg : JSON.stringify(arg))).join(" "))
+                .join("\n");
+        }
+        finally {
+            logSpy.mockRestore();
+            errorSpy.mockRestore();
+            if (oldSecretHost === undefined)
+                delete process.env.SECRET_TCP_HOST;
+            else
+                process.env.SECRET_TCP_HOST = oldSecretHost;
+            if (oldSecretPort === undefined)
+                delete process.env.SECRET_TCP_PORT;
+            else
+                process.env.SECRET_TCP_PORT = oldSecretPort;
+        }
+        expect(serializedLogs).not.toContain("10.0.0.10");
+        expect(serializedLogs).not.toContain("8443");
+    });
+    it("passes commitMessages.signoff to status change commits", async () => {
+        getConfig.mockResolvedValue({
+            owner: "owner",
+            repo: "repo",
+            sites: [
+                {
+                    name: "DCO Site",
+                    url: "https://example.com",
+                    type: "globalping",
+                },
+            ],
+            assignees: [],
+            workflowSchedule: {},
+            commitMessages: {
+                commitAuthorName: "DCO Bot",
+                commitAuthorEmail: "dco@example.com",
+                signoff: true,
+            },
+        });
+        mockCreateMeasurement.mockResolvedValue({
+            ok: true,
+            data: { id: "measurement-id" },
+        });
+        mockAwaitMeasurement.mockResolvedValue({
+            ok: true,
+            data: {
+                results: [
+                    {
+                        result: {
+                            statusCode: 200,
+                            timings: { total: 123 },
+                            rawBody: "",
+                        },
+                    },
+                ],
+            },
+        });
+        await update(true);
+        expect(commit).toHaveBeenCalledWith(expect.stringContaining("DCO Site is up (200 in 123 ms)"), "DCO Bot", "dco@example.com", true);
     });
     it("does not open an incident for expected degraded maintenance", async () => {
         getConfig.mockResolvedValue({

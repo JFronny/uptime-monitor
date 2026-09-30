@@ -81,6 +81,54 @@ describe("workflow helpers", () => {
         }
         expect(listTags).not.toHaveBeenCalled();
     });
+    it("generates optional GitHub App token support without using secrets in conditions", async () => {
+        const { getConfig, getOctokit, graphsCiWorkflow, responseTimeCiWorkflow, setupCiWorkflow, siteCiWorkflow, summaryCiWorkflow, updateTemplateCiWorkflow, updatesCiWorkflow, uptimeCiWorkflow, } = loadWorkflowHelpers();
+        const listReleases = jest.fn().mockResolvedValue({ data: [{ tag_name: "v1.43.16" }] });
+        getConfig.mockResolvedValue({
+            sites: [{ name: "Example", url: "https://example.com" }],
+            workflowSchedule: {},
+            commitMessages: {},
+            "status-website": {},
+        });
+        getOctokit.mockResolvedValue({
+            repos: { listReleases },
+        });
+        const workflows = await Promise.all([
+            graphsCiWorkflow(),
+            responseTimeCiWorkflow(),
+            setupCiWorkflow(),
+            siteCiWorkflow(),
+            summaryCiWorkflow(),
+            updateTemplateCiWorkflow(),
+            updatesCiWorkflow(),
+            uptimeCiWorkflow(),
+        ]);
+        for (const workflow of workflows) {
+            const parsed = js_yaml_1.default.load(workflow);
+            const steps = parsed.jobs.release.steps;
+            const appTokenStep = steps.find((step) => step.id === "app_token");
+            const clearPrivateKeyStep = steps.find((step) => step.name === "Clear GitHub App private key");
+            expect(parsed.jobs.release.env).toMatchObject({
+                GH_APP_PRIVATE_KEY: "${{ secrets.GH_APP_PRIVATE_KEY }}",
+            });
+            expect(appTokenStep).toMatchObject({
+                name: "Create GitHub App token",
+                if: "${{ vars.GH_APP_ID != '' && env.GH_APP_PRIVATE_KEY != '' }}",
+                uses: "actions/create-github-app-token@v3",
+                with: {
+                    "client-id": "${{ vars.GH_APP_ID }}",
+                    "private-key": "${{ env.GH_APP_PRIVATE_KEY }}",
+                },
+            });
+            expect(clearPrivateKeyStep).toMatchObject({
+                if: "${{ always() }}",
+                shell: "bash",
+                run: 'echo "GH_APP_PRIVATE_KEY=" >> "$GITHUB_ENV"',
+            });
+            expect(workflow).toContain("${{ steps.app_token.outputs.token || secrets.GH_PAT || github.token }}");
+            expect(workflow).not.toMatch(/if: \$\{\{[^\n]*secrets\./);
+        }
+    });
     it("generates the static site workflow for assets changes", async () => {
         const { getConfig, getOctokit, siteCiWorkflow } = loadWorkflowHelpers();
         const listReleases = jest.fn().mockResolvedValue({ data: [{ tag_name: "v1.41.7" }] });
@@ -97,6 +145,81 @@ describe("workflow helpers", () => {
   push:
     paths:
       - "assets/**"`);
+    });
+    it("pins generated graph rendering to Node 20", async () => {
+        const { getConfig, getOctokit, graphsCiWorkflow } = loadWorkflowHelpers();
+        const listReleases = jest.fn().mockResolvedValue({ data: [{ tag_name: "v1.41.9" }] });
+        getConfig.mockResolvedValue({
+            sites: [{ name: "Example", url: "https://example.com" }],
+            workflowSchedule: {},
+            commitMessages: {},
+            "status-website": {},
+        });
+        getOctokit.mockResolvedValue({
+            repos: { listReleases },
+        });
+        const workflow = await graphsCiWorkflow();
+        const parsed = js_yaml_1.default.load(workflow);
+        const steps = parsed.jobs.release.steps;
+        expect(steps).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                name: "Setup Node.js for graphs",
+                uses: "actions/setup-node@v6",
+                with: { "node-version": "20" },
+            }),
+            expect.objectContaining({
+                name: "Generate graphs",
+                uses: "upptime/uptime-monitor@v1.41.9",
+                with: { command: "graphs" },
+            }),
+        ]));
+        expect(steps.findIndex((step) => step.name === "Setup Node.js for graphs")).toBeLessThan(steps.findIndex((step) => step.name === "Generate graphs"));
+    });
+    it("falls back to direct graph generation when workflow dispatch cannot find Graphs CI", async () => {
+        const { getConfig, getOctokit, setupCiWorkflow } = loadWorkflowHelpers();
+        const listReleases = jest.fn().mockResolvedValue({ data: [{ tag_name: "v1.41.9" }] });
+        getConfig.mockResolvedValue({
+            sites: [{ name: "Example", url: "https://example.com" }],
+            workflowSchedule: {},
+            commitMessages: {},
+            "status-website": {},
+        });
+        getOctokit.mockResolvedValue({
+            repos: { listReleases },
+        });
+        const workflow = await setupCiWorkflow();
+        const parsed = js_yaml_1.default.load(workflow);
+        const steps = parsed.jobs.release.steps;
+        const dispatchStep = steps.find((step) => step.id === "dispatch_graphs");
+        const setupNodeStep = steps.find((step) => step.name === "Setup Node.js for direct graph generation");
+        const fallbackStep = steps.find((step) => step.name === "Generate graphs directly if dispatch fails");
+        expect(dispatchStep).toMatchObject({
+            name: "Generate graphs",
+            uses: "benc-uk/workflow-dispatch@v1",
+            "continue-on-error": true,
+            with: {
+                workflow: "Graphs CI",
+                token: "${{ steps.app_token.outputs.token || secrets.GH_PAT || github.token }}",
+            },
+        });
+        expect(setupNodeStep).toMatchObject({
+            if: "steps.dispatch_graphs.outcome == 'failure'",
+            uses: "actions/setup-node@v6",
+            with: {
+                "node-version": "20",
+            },
+        });
+        expect(fallbackStep).toMatchObject({
+            if: "steps.dispatch_graphs.outcome == 'failure'",
+            uses: "upptime/uptime-monitor@v1.41.9",
+            with: {
+                command: "graphs",
+            },
+            env: {
+                GH_PAT: "${{ steps.app_token.outputs.token || secrets.GH_PAT || github.token }}",
+            },
+        });
+        expect(steps.indexOf(setupNodeStep)).toBeLessThan(steps.indexOf(fallbackStep));
     });
     it("generates workflows that serialize branch writes from the live branch tip", async () => {
         const { getConfig, getOctokit, graphsCiWorkflow, responseTimeCiWorkflow, setupCiWorkflow, siteCiWorkflow, summaryCiWorkflow, updateTemplateCiWorkflow, updatesCiWorkflow, uptimeCiWorkflow, } = loadWorkflowHelpers();
@@ -124,14 +247,14 @@ describe("workflow helpers", () => {
             expect(workflow).toContain(`concurrency:
   group: \${{ github.repository }}-\${{ github.head_ref || github.ref_name }}-upptime
   cancel-in-progress: false`);
-            expect(workflow).toContain("ref: \${{ github.head_ref || github.ref_name }}");
+            expect(workflow).toContain("ref: ${{ github.head_ref || github.ref_name }}");
         }
     });
-    it("keeps passing the full GitHub Actions secrets context by default", async () => {
+    it("generates bounded secrets contexts in automatic compatibility mode", async () => {
         const { getConfig, getOctokit, responseTimeCiWorkflow, setupCiWorkflow, uptimeCiWorkflow } = loadWorkflowHelpers();
         const listReleases = jest.fn().mockResolvedValue({ data: [{ tag_name: "v1.41.10" }] });
         getConfig.mockResolvedValue({
-            sites: [{ name: "Example", url: "https://example.com" }],
+            sites: [{ name: "Example", url: "https://$PRIVATE_HOST/$TENANT_ID" }],
             workflowSchedule: {},
             commitMessages: {},
             "status-website": {},
@@ -139,9 +262,19 @@ describe("workflow helpers", () => {
         getOctokit.mockResolvedValue({
             repos: { listReleases },
         });
-        const workflows = await Promise.all([responseTimeCiWorkflow(), setupCiWorkflow(), uptimeCiWorkflow()]);
+        const workflows = await Promise.all([
+            responseTimeCiWorkflow(),
+            setupCiWorkflow(),
+            uptimeCiWorkflow(),
+        ]);
         for (const workflow of workflows) {
-            expect(workflow).toContain("SECRETS_CONTEXT: ${{ toJson(secrets) }}");
+            expect(workflow).toContain('"PRIVATE_HOST":${{ toJson(secrets.PRIVATE_HOST) }}');
+            expect(workflow).toContain('"TENANT_ID":${{ toJson(secrets.TENANT_ID) }}');
+            expect(workflow).toContain('"GLOBALPING_TOKEN":${{ toJson(secrets.GLOBALPING_TOKEN) }}');
+            expect(workflow).toContain("# Configure the secret allowlist in .upptimerc.yml; do not edit this workflow directly.");
+            expect(workflow).not.toContain("toJson(secrets) }}");
+            expect(() => js_yaml_1.default.load(workflow)).not.toThrow();
+            expect(js_yaml_1.default.load(workflow)).toHaveProperty("jobs");
         }
     });
     it("generates an allowlisted secrets context when config.secrets is set", async () => {
@@ -157,27 +290,17 @@ describe("workflow helpers", () => {
         getOctokit.mockResolvedValue({
             repos: { listReleases },
         });
-        const workflows = await Promise.all([responseTimeCiWorkflow(), setupCiWorkflow(), uptimeCiWorkflow()]);
+        const workflows = await Promise.all([
+            responseTimeCiWorkflow(),
+            setupCiWorkflow(),
+            uptimeCiWorkflow(),
+        ]);
         const expected = 'SECRETS_CONTEXT: \'{"GH_PAT":${{ toJson(secrets.GH_PAT) }},"SLACK_WEBHOOK_URL":${{ toJson(secrets.SLACK_WEBHOOK_URL) }}}\'';
         for (const workflow of workflows) {
             expect(workflow).toContain(expected);
             expect(workflow).not.toContain("SECRETS_CONTEXT: ${{ toJson(secrets) }}");
             expect(() => js_yaml_1.default.load(workflow)).not.toThrow();
             expect(js_yaml_1.default.load(workflow)).toHaveProperty("jobs");
-        }
-    });
-    it("deduplicates configured secret names", () => {
-        const { getSecretsContext } = loadWorkflowHelpers();
-        expect(getSecretsContext({ secrets: ["GH_PAT", "GH_PAT"] })).toBe('\'{"GH_PAT":${{ toJson(secrets.GH_PAT) }}}\'');
-    });
-    it("allows uppercase secret names that start with an underscore", () => {
-        const { getSecretsContext } = loadWorkflowHelpers();
-        expect(getSecretsContext({ secrets: ["_PRIVATE"] })).toBe('\'{"_PRIVATE":${{ toJson(secrets._PRIVATE) }}}\'');
-    });
-    it("rejects reserved, lowercase, and digit-prefixed secret names", () => {
-        const { getSecretsContext } = loadWorkflowHelpers();
-        for (const secret of ["GITHUB_TOKEN", "gh_pat", "1PASSWORD"]) {
-            expect(() => getSecretsContext({ secrets: [secret] })).toThrow(`Invalid secret name in .upptimerc.yml secrets allowlist: ${secret}`);
         }
     });
     it("generates an empty secrets object when config.secrets is empty", async () => {
@@ -205,10 +328,6 @@ describe("workflow helpers", () => {
             repos: { listReleases },
         });
         await expect(uptimeCiWorkflow()).rejects.toThrow("Invalid .upptimerc.yml secrets allowlist: expected a list of GitHub secret names.");
-    });
-    it("rejects non-string secret names in the allowlist", () => {
-        const { getSecretsContext } = loadWorkflowHelpers();
-        expect(() => getSecretsContext({ secrets: [42] })).toThrow("Invalid .upptimerc.yml secrets allowlist: expected every secret name to be a string.");
     });
     it("rejects secret names that cannot be referenced safely in GitHub expressions", async () => {
         const { getConfig, getOctokit, uptimeCiWorkflow } = loadWorkflowHelpers();

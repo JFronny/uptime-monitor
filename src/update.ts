@@ -17,7 +17,7 @@ import { exec } from "shelljs";
 import { getConfig } from "./helpers/config";
 import { replaceEnvironmentVariables } from "./helpers/environment";
 import { commit, lastCommit, push } from "./helpers/git";
-import { getOctokit } from "./helpers/github";
+import { getOctokit, retryTransientGitHubRequest } from "./helpers/github";
 import { shouldContinue } from "./helpers/init-check";
 import { sendNotification } from "./helpers/notifme";
 import { ping } from "./helpers/ping";
@@ -50,6 +50,19 @@ function getHumanReadableTimeDifference(startTime: Date): string {
   if (diffMinutes > 0)
     result.push(`${diffMinutes.toLocaleString()} ${diffMinutes > 1 ? "minutes" : "minute"}`);
   return result.join(", ");
+}
+
+function sanitizeTcpPingResultForLog<T extends { address?: unknown; port?: unknown }>(tcpResult: T) {
+  const { address: _address, port: _port, ...safeResult } = tcpResult;
+  return safeResult;
+}
+
+function redactEnvironmentVariableReferences(value: string) {
+  return value.replace(/\$[A-Za-z_][A-Za-z0-9_]*/g, "[redacted]");
+}
+
+function getNotificationSiteUrl(site: UpptimeConfig["sites"][number]) {
+  return redactEnvironmentVariableReferences(site.url);
 }
 
 function getStatusFromHttpResult(
@@ -139,15 +152,17 @@ export const update = async (shouldCommit = false) => {
 
   let hasDelta = false;
 
-  const _ongoingMaintenanceEvents = await octokit.issues.listForRepo({
-    owner,
-    repo,
-    state: "open",
-    filter: "all",
-    sort: "created",
-    direction: "desc",
-    labels: "maintenance",
-  });
+  const _ongoingMaintenanceEvents = await retryTransientGitHubRequest(() =>
+    octokit.issues.listForRepo({
+      owner,
+      repo,
+      state: "open",
+      filter: "all",
+      sort: "created",
+      direction: "desc",
+      labels: "maintenance",
+    })
+  );
   console.log("Found ongoing maintenance events", _ongoingMaintenanceEvents.data.length);
   const ongoingMaintenanceEvents: {
     issueNumber: number;
@@ -215,6 +230,7 @@ export const update = async (shouldCommit = false) => {
     }
 
     const slug = getSiteSlug(site);
+    const notificationSiteUrl = getNotificationSiteUrl(site);
     let currentStatus = "unknown";
     let startTime = new Date();
     try {
@@ -266,16 +282,25 @@ export const update = async (shouldCommit = false) => {
             inProgressUpdates: false,
             limit: 1,
             locations: [{ magic: site.location || "world" }],
-            measurementOptions: {
-              ipVersion: site.ipv6 ? IpVersion[6] : IpVersion[4],
-            },
+            ...(isIP(url.hostname)
+              ? {}
+              : {
+                  measurementOptions: {
+                    ipVersion: site.ipv6 ? IpVersion[6] : IpVersion[4],
+                  },
+                }),
           });
           if (res.ok) {
             console.log("Fetching globalping measurement", res.data.id);
             const measurement = await client.awaitMeasurement(res.data.id);
             if (measurement.ok) {
-              const result = measurement.data.results[0].result as FinishedPingTestResult;
-              const responseTime = result.stats.avg || 0;
+              const result = measurement.data.results[0].result;
+              if (result.status === "failed" || result.status === "offline") {
+                console.log("Globalping ping measurement failed:", result.status);
+                return { result: { httpCode: 0 }, responseTime: "0", status: "down" };
+              }
+              const finishedResult = result as FinishedPingTestResult;
+              const responseTime = finishedResult.stats.avg || 0;
               let status: "up" | "down" | "degraded" = "up";
               if (responseTime > (site.maxResponseTime || 60000)) {
                 status = "degraded";
@@ -326,24 +351,29 @@ export const update = async (shouldCommit = false) => {
             console.log("Fetching globalping measurement", res.data.id);
             const measurement = await client.awaitMeasurement(res.data.id);
             if (measurement.ok) {
-              const result = measurement.data.results[0].result as FinishedHttpTestResult;
+              const result = measurement.data.results[0].result;
+              if (result.status === "failed" || result.status === "offline") {
+                console.log("Globalping HTTP measurement failed:", result.status);
+                return { result: { httpCode: 0 }, responseTime: "0", status: "down" };
+              }
+              const finishedResult = result as FinishedHttpTestResult;
               if (site.check === "ssl") {
                 return {
                   result: { httpCode: 200 },
                   responseTime: "0",
-                  status: getStatusFromCertificateExpiresAt(result.tls?.expiresAt),
+                  status: getStatusFromCertificateExpiresAt(finishedResult.tls?.expiresAt),
                 };
               }
-              const responseTime = result.timings.total || 0;
+              const responseTime = finishedResult.timings.total || 0;
               const status = getStatusFromHttpResult(
                 site,
-                result.statusCode,
-                result.rawBody || "",
+                finishedResult.statusCode,
+                finishedResult.rawBody || "",
                 responseTime
               );
               return {
                 result: {
-                  httpCode: result.statusCode,
+                  httpCode: finishedResult.statusCode,
                 },
                 responseTime: responseTime.toFixed(0),
                 status,
@@ -417,7 +447,7 @@ export const update = async (shouldCommit = false) => {
             if (attempt > 1) {
               console.log(`tcp-ping succeeded on attempt ${attempt}`);
             }
-            console.log("Got result", tcpResult);
+            console.log("Got result", sanitizeTcpPingResultForLog(tcpResult));
             let responseTime = (tcpResult.avg || 0).toFixed(0);
             if (parseInt(responseTime) > (site.maxResponseTime || 60000)) status = "degraded";
             return {
@@ -614,7 +644,8 @@ generator: Upptime <https://github.com/upptime/upptime>
             .replace("$RESPONSE_CODE", result.httpCode.toString())
             .replace("$RESPONSE_TIME", responseTime),
           (config.commitMessages || {}).commitAuthorName,
-          (config.commitMessages || {}).commitAuthorEmail
+          (config.commitMessages || {}).commitAuthorEmail,
+          (config.commitMessages || {}).signoff
         );
         const lastCommitSha = lastCommit();
 
@@ -682,10 +713,10 @@ generator: Upptime <https://github.com/upptime/upptime>
                 const downmsg = (await getSecret("NOTIFICATIONS_DOWN_MESSAGE"))
                   ? (getSecret("NOTIFICATIONS_DOWN_MESSAGE") || "")
                       .replace("$SITE_NAME", site.name)
-                      .replace("$SITE_URL", `(${site.url})`)
+                      .replace("$SITE_URL", `(${notificationSiteUrl})`)
                       .replace("$ISSUE_URL", `${newIssue.data.html_url}`)
                       .replace("$RESPONSE_CODE", result.httpCode.toString())
-                  : `$EMOJI ${site.name} (${site.url}) is $STATUS : ${newIssue.data.html_url}`;
+                  : `$EMOJI ${site.name} (${notificationSiteUrl}) is $STATUS : ${newIssue.data.html_url}`;
 
                 await sendNotification(
                   status === "down"
@@ -741,8 +772,8 @@ generator: Upptime <https://github.com/upptime/upptime>
               const upmsg = (await getSecret("NOTIFICATIONS_UP_MESSAGE"))
                 ? (getSecret("NOTIFICATIONS_UP_MESSAGE") || "")
                     .replace("$SITE_NAME", site.name)
-                    .replace("$SITE_URL", `(${site.url})`)
-                : `$EMOJI ${site.name} (${site.url}) $STATUS`;
+                    .replace("$SITE_URL", `(${notificationSiteUrl})`)
+                : `$EMOJI ${site.name} (${notificationSiteUrl}) $STATUS`;
 
               await sendNotification(
                 upmsg
@@ -774,7 +805,7 @@ generator: Upptime <https://github.com/upptime/upptime>
   }
   push();
 
-  if (hasDelta) generateSummary();
+  if (hasDelta) await generateSummary();
 };
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

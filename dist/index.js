@@ -49,6 +49,7 @@ const updateDependencies = async () => {
     if (`${owner}/${repo}` !== "upptime/upptime")
         return;
     const config = await (0, config_1.getConfig)();
+    const commitMessages = config.commitMessages || {};
     const octokit = await (0, github_1.getOctokit)();
     let changes = 0;
     await (0, fs_extra_1.ensureDir)((0, path_1.join)(".", ".github", "workflows"));
@@ -72,12 +73,12 @@ const updateDependencies = async () => {
         const pkgName = pkgOldVersion.split("@")[0];
         for await (const workflow of workflows) {
             let contents = await (0, fs_extra_1.readFile)((0, path_1.join)(".", ".github", "workflows", workflow), "utf8");
-            contents = contents.replace(pkgOldVersion, uses[pkgOldVersion]);
+            contents = contents.replaceAll(pkgOldVersion, uses[pkgOldVersion]);
             await (0, fs_extra_1.writeFile)((0, path_1.join)(".", ".github", "workflows", workflow), contents);
         }
         if (pkgOldVersion.split("@")[1] !== uses[pkgOldVersion].split("@")[1])
             changes++;
-        (0, git_1.commit)(`:arrow_up: Bump ${pkgName} from ${pkgOldVersion.split("@")[1]} to ${uses[pkgOldVersion].split("@")[1]}\n\nBumps [${pkgName}](https://github.com/${pkgName}) from ${pkgOldVersion.split("@")[1]} to ${uses[pkgOldVersion].split("@")[1]}.\n- [Release notes](https://github.com/${pkgName}/releases)\n- [Commits](https://github.com/${pkgName}@${pkgOldVersion.split("@")[1]}...${uses[pkgOldVersion].split("@")[1]})\n\nSigned-off-by: Anand Chowdhary <github@anandchowdhary.com>`, (config.commitMessages || {}).commitAuthorName, (config.commitMessages || {}).commitAuthorEmail);
+        (0, git_1.commit)(`:arrow_up: Bump ${pkgName} from ${pkgOldVersion.split("@")[1]} to ${uses[pkgOldVersion].split("@")[1]}\n\nBumps [${pkgName}](https://github.com/${pkgName}) from ${pkgOldVersion.split("@")[1]} to ${uses[pkgOldVersion].split("@")[1]}.\n- [Release notes](https://github.com/${pkgName}/releases)\n- [Commits](https://github.com/${pkgName}@${pkgOldVersion.split("@")[1]}...${uses[pkgOldVersion].split("@")[1]})${commitMessages.signoff ? "" : "\n\nSigned-off-by: Anand Chowdhary <github@anandchowdhary.com>"}`, commitMessages.commitAuthorName, commitMessages.commitAuthorEmail, commitMessages.signoff);
     }
     (0, git_1.push)();
     if (changes) {
@@ -128,7 +129,7 @@ const generateGraphs = async () => {
     }
     catch (error) { }
     await (0, temp_1.tempFixes)();
-    (0, git_1.commit)((config.commitMessages || {}).graphsUpdate || ":bento: Update graphs [skip ci]", (config.commitMessages || {}).commitAuthorName, (config.commitMessages || {}).commitAuthorEmail);
+    (0, git_1.commit)((config.commitMessages || {}).graphsUpdate || ":bento: Update graphs [skip ci]", (config.commitMessages || {}).commitAuthorName, (config.commitMessages || {}).commitAuthorEmail, (config.commitMessages || {}).signoff);
     (0, git_1.push)();
 };
 exports.generateGraphs = generateGraphs;
@@ -552,11 +553,11 @@ const runGit = (args, throwOnError = false) => {
     }
     return output;
 };
-const commit = (message, name = "Upptime Bot", email = "73812536+upptime-bot@users.noreply.github.com") => {
+const commit = (message, name = "Upptime Bot", email = "73812536+upptime-bot@users.noreply.github.com", signoff = false) => {
     runGit(["config", "--global", "user.email", email]);
     runGit(["config", "--global", "user.name", name]);
     runGit(["add", "."]);
-    runGit(["commit", "-m", message]);
+    runGit(["commit", ...(signoff ? ["--signoff"] : []), "-m", message]);
 };
 exports.commit = commit;
 const push = () => {
@@ -577,10 +578,42 @@ exports.lastCommit = lastCommit;
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getOctokit = void 0;
+exports.getOctokit = exports.retryTransientGitHubRequest = void 0;
 const rest_1 = __nccwpck_require__(55375);
 const config_1 = __nccwpck_require__(99153);
 const secrets_1 = __nccwpck_require__(10020);
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const getGitHubErrorStatus = (error) => {
+    if (typeof error !== "object" || error === null)
+        return undefined;
+    const status = error.status;
+    if (typeof status === "number")
+        return status;
+    const responseStatus = error.response?.status;
+    return typeof responseStatus === "number" ? responseStatus : undefined;
+};
+const retryTransientGitHubRequest = async (request, options = {}) => {
+    const maxAttempts = options.maxAttempts ?? 3;
+    const initialDelayMs = options.initialDelayMs ?? 1000;
+    const waitForRetry = options.wait ?? wait;
+    const log = options.log ?? console.warn;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+            return await request();
+        }
+        catch (error) {
+            const status = getGitHubErrorStatus(error);
+            const isTransient = status !== undefined && status >= 500 && status <= 599;
+            if (!isTransient || attempt === maxAttempts)
+                throw error;
+            const delayMs = initialDelayMs * Math.pow(2, attempt - 1);
+            log(`GitHub API request failed with HTTP ${status}; retrying in ${delayMs}ms`);
+            await waitForRetry(delayMs);
+        }
+    }
+    throw new Error("GitHub API retry attempts exhausted");
+};
+exports.retryTransientGitHubRequest = retryTransientGitHubRequest;
 const getOctokit = async () => {
     const config = await (0, config_1.getConfig)();
     return new rest_1.Octokit({
@@ -642,11 +675,69 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.sendNotification = void 0;
+exports.sendNotification = exports.createTeamsAdaptiveCardPayload = exports.formatTelegramHtmlMessage = exports.formatNotificationError = void 0;
 const axios_1 = __importDefault(__nccwpck_require__(96545));
 const notifme_sdk_1 = __importDefault(__nccwpck_require__(16976));
 const environment_1 = __nccwpck_require__(69993);
 const secrets_1 = __nccwpck_require__(10020);
+const notifmeChannelLabels = {
+    email: "email",
+    sms: "SMS",
+    slack: "Slack",
+};
+const formatNotificationError = (error) => {
+    if (error instanceof Error)
+        return error.message;
+    if (typeof error === "string")
+        return error;
+    if (error && typeof error === "object" && "message" in error) {
+        const message = error.message;
+        if (typeof message === "string")
+            return message;
+    }
+    return String(error);
+};
+exports.formatNotificationError = formatNotificationError;
+const logNotificationError = (channel, error) => {
+    console.log(`Error sending ${channel}: ${(0, exports.formatNotificationError)(error)}`);
+};
+const logNotifmeSendResult = (channel, result) => {
+    const label = notifmeChannelLabels[channel];
+    if (result?.status === "error") {
+        logNotificationError(label, result.errors?.[channel] || result.errors || result);
+        return false;
+    }
+    console.log(`Success ${label}`);
+    return true;
+};
+const formatTelegramHtmlMessage = (message) => message
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\*\*([\s\S]*?)\*\*/g, "<b>$1</b>");
+exports.formatTelegramHtmlMessage = formatTelegramHtmlMessage;
+const createTeamsAdaptiveCardPayload = (message) => ({
+    type: "message",
+    attachments: [
+        {
+            contentType: "application/vnd.microsoft.card.adaptive",
+            contentUrl: null,
+            content: {
+                $schema: "https://adaptivecards.io/schemas/adaptive-card.json",
+                type: "AdaptiveCard",
+                version: "1.2",
+                body: [
+                    {
+                        type: "TextBlock",
+                        text: message,
+                        wrap: true,
+                    },
+                ],
+            },
+        },
+    ],
+});
+exports.createTeamsAdaptiveCardPayload = createTeamsAdaptiveCardPayload;
 const channels = {};
 if ((0, secrets_1.getSecret)("NOTIFICATION_EMAIL_SENDGRID") ||
     (0, secrets_1.getSecret)("NOTIFICATION_EMAIL_SES") ||
@@ -772,18 +863,18 @@ if ((0, secrets_1.getSecret)("NOTIFICATION_SMS_46ELKS") ||
         });
     }
 }
-if ((0, secrets_1.getSecret)("NOTIFICATION_SLACK")) {
+const slackWebhookUrl = (0, secrets_1.getSecret)("NOTIFICATION_SLACK_WEBHOOK_URL");
+if ((0, secrets_1.getSecret)("NOTIFICATION_SLACK") && slackWebhookUrl) {
     channels.slack = {
-        providers: [],
+        providers: [
+            {
+                type: "webhook",
+                webhookUrl: slackWebhookUrl,
+            },
+        ],
         multiProviderStrategy: (0, secrets_1.getSecret)("NOTIFICATION_SLACK_STRATEGY") ||
             "roundrobin",
     };
-    if ((0, secrets_1.getSecret)("NOTIFICATION_SLACK_WEBHOOK")) {
-        channels.slack.providers.push({
-            type: "webhook",
-            webhookUrl: (0, secrets_1.getSecret)("NOTIFICATION_SLACK_WEBHOOK_URL"),
-        });
-    }
 }
 const notifier = new notifme_sdk_1.default({
     channels,
@@ -794,7 +885,7 @@ const sendNotification = async (message) => {
     if (channels.email) {
         console.log("Sending email");
         try {
-            await notifier.send({
+            const result = await notifier.send({
                 email: {
                     from: ((0, secrets_1.getSecret)("NOTIFICATION_EMAIL_FROM") || (0, secrets_1.getSecret)("NOTIFICATION_EMAIL")),
                     to: ((0, secrets_1.getSecret)("NOTIFICATION_EMAIL_TO") || (0, secrets_1.getSecret)("NOTIFICATION_EMAIL")),
@@ -802,10 +893,10 @@ const sendNotification = async (message) => {
                     html: message,
                 },
             });
-            console.log("Success email");
+            logNotifmeSendResult("email", result);
         }
         catch (error) {
-            console.log("Got an error", error);
+            logNotificationError("email", error);
         }
         console.log("Finished sending email");
     }
@@ -814,33 +905,34 @@ const sendNotification = async (message) => {
         try {
             const phoneNumbers = (0, secrets_1.getSecret)("NOTIFICATION_SMS_TO")?.split(",") ?? [];
             for (const phoneNumber of phoneNumbers) {
-                await notifier.send({
+                const result = await notifier.send({
                     sms: {
                         from: (0, secrets_1.getSecret)("NOTIFICATION_SMS_FROM"),
                         to: phoneNumber,
                         text: message,
                     },
                 });
+                if (!logNotifmeSendResult("sms", result))
+                    break;
             }
-            console.log("Success SMS");
         }
         catch (error) {
-            console.log("Got an error", error);
+            logNotificationError("SMS", error);
         }
         console.log("Finished sending SMS");
     }
     if (channels.slack) {
         console.log("Sending Slack");
         try {
-            await notifier.send({
+            const result = await notifier.send({
                 slack: {
                     text: message,
                 },
             });
-            console.log("Success Slack");
+            logNotifmeSendResult("slack", result);
         }
         catch (error) {
-            console.log("Got an error", error);
+            logNotificationError("Slack", error);
         }
         console.log("Finished sending Slack");
     }
@@ -853,7 +945,7 @@ const sendNotification = async (message) => {
             console.log("Success Discord");
         }
         catch (error) {
-            console.log("Got an error", error);
+            logNotificationError("Discord", error);
         }
         console.log("Finished sending Discord");
     }
@@ -866,7 +958,7 @@ const sendNotification = async (message) => {
             console.log("Success Google Chat");
         }
         catch (error) {
-            console.log("Got an error", error);
+            logNotificationError("Google Chat", error);
         }
         console.log("Finished sending Google Chat");
     }
@@ -889,7 +981,7 @@ const sendNotification = async (message) => {
             console.log("Success Zulip");
         }
         catch (error) {
-            console.log("Got an error", error);
+            logNotificationError("Zulip", error);
         }
         console.log("Finished sending Zulip");
     }
@@ -955,16 +1047,16 @@ const sendNotification = async (message) => {
             const chatIds = (0, secrets_1.getSecret)("NOTIFICATION_TELEGRAM_CHAT_ID")?.split(",") ?? [];
             for (const chatId of chatIds) {
                 await axios_1.default.post(`https://api.telegram.org/bot${(0, secrets_1.getSecret)("NOTIFICATION_TELEGRAM_BOT_KEY")}/sendMessage`, {
-                    parse_mode: "Markdown",
+                    parse_mode: "HTML",
                     disable_web_page_preview: true,
                     chat_id: chatId.trim(),
-                    text: message.replace(/_/g, '\\_'),
+                    text: (0, exports.formatTelegramHtmlMessage)(message),
                 });
             }
             console.log("Success Telegram");
         }
         catch (error) {
-            console.log("Got an error", error);
+            logNotificationError("Telegram", error);
         }
         console.log("Finished sending Telegram");
     }
@@ -988,24 +1080,18 @@ const sendNotification = async (message) => {
             console.log("Success Lark");
         }
         catch (error) {
-            console.log("Got an error", error);
+            logNotificationError("Lark", error);
         }
         console.log("Finished sending Lark");
     }
     if ((0, secrets_1.getSecret)("NOTIFICATION_TEAMS")) {
         console.log("Sending Microsoft Teams");
         try {
-            await axios_1.default.post(`${(0, secrets_1.getSecret)("NOTIFICATION_TEAMS_WEBHOOK_URL")}`, {
-                "@context": "https://schema.org/extensions",
-                "@type": "MessageCard",
-                themeColor: "0072C6",
-                text: message,
-                summary: message
-            });
+            await axios_1.default.post(`${(0, secrets_1.getSecret)("NOTIFICATION_TEAMS_WEBHOOK_URL")}`, (0, exports.createTeamsAdaptiveCardPayload)(message));
             console.log("Success Microsoft Teams");
         }
         catch (error) {
-            console.log("Got an error", error);
+            logNotificationError("Microsoft Teams", error);
         }
         console.log("Finished sending Microsoft Teams");
     }
@@ -1024,7 +1110,7 @@ const sendNotification = async (message) => {
             console.log("Success Webhook");
         }
         catch (error) {
-            console.log("Got an error", error);
+            logNotificationError("Webhook", error);
         }
         console.log("Finished sending Webhook");
     }
@@ -1039,7 +1125,7 @@ const sendNotification = async (message) => {
             console.log("Success Gotify");
         }
         catch (error) {
-            console.log("Got an error", error);
+            logNotificationError("Gotify", error);
         }
         console.log("Finished sending Gotify");
     }
@@ -1285,7 +1371,15 @@ exports.curl = curl;
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getOwnerRepo = exports.getSecret = void 0;
+exports.generatedWorkflowToken = exports.githubAppTokenSteps = exports.githubAppTokenJobEnvironment = exports.getOwnerRepo = exports.getSecret = exports.hydrateSecretsEnvironment = void 0;
+const hydrateSecretsEnvironment = (serialized = process.env.SECRETS_CONTEXT || "{}") => {
+    const secrets = JSON.parse(serialized);
+    for (const [name, value] of Object.entries(secrets)) {
+        if (typeof value === "string" && value.length > 0)
+            process.env[name] = value;
+    }
+};
+exports.hydrateSecretsEnvironment = hydrateSecretsEnvironment;
 /** Get a secret from the context or an environment variable */
 const getSecret = (key) => {
     const SECRETS_CONTEXT = process.env.SECRETS_CONTEXT || "{}";
@@ -1303,6 +1397,20 @@ const getOwnerRepo = () => {
     return result;
 };
 exports.getOwnerRepo = getOwnerRepo;
+exports.githubAppTokenJobEnvironment = `    env:
+      GH_APP_PRIVATE_KEY: \${{ secrets.GH_APP_PRIVATE_KEY }}`;
+exports.githubAppTokenSteps = `      - name: Create GitHub App token
+        id: app_token
+        if: \${{ vars.GH_APP_ID != '' && env.GH_APP_PRIVATE_KEY != '' }}
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: \${{ vars.GH_APP_ID }}
+          private-key: \${{ env.GH_APP_PRIVATE_KEY }}
+      - name: Clear GitHub App private key
+        if: \${{ always() }}
+        shell: bash
+        run: echo "GH_APP_PRIVATE_KEY=" >> "$GITHUB_ENV"`;
+exports.generatedWorkflowToken = "\${{ steps.app_token.outputs.token || secrets.GH_PAT || github.token }}";
 //# sourceMappingURL=secrets.js.map
 
 /***/ }),
@@ -1357,16 +1465,193 @@ exports.tempFixes = tempFixes;
 
 /***/ }),
 
+/***/ 71921:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.renderSecretsContext = exports.getWorkflowSecretNames = exports.getConfiguredSecretReferences = exports.validateSecretNames = exports.UPPTIME_RUNTIME_SECRET_NAMES = void 0;
+const SECRET_NAME_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
+const DISCOVERABLE_SECRET_PATTERN = /\$([A-Z_][A-Z0-9_]*)/g;
+const EXCLUDED_DISCOVERED_NAMES = new Set([
+    "DYNAMIC_ALPHANUMERIC_STRING",
+    "DYNAMIC_RANDOM_NUMBER",
+    "GH_PAT",
+]);
+exports.UPPTIME_RUNTIME_SECRET_NAMES = [
+    "DYNAMIC_STRING_LENGTH",
+    "GLOBALPING_TOKEN",
+    "NOTIFICATIONS_DOWN_MESSAGE",
+    "NOTIFICATIONS_UP_MESSAGE",
+    "NOTIFICATION_CUSTOM_WEBHOOK",
+    "NOTIFICATION_CUSTOM_WEBHOOK_URL",
+    "NOTIFICATION_DISCORD_WEBHOOK_URL",
+    "NOTIFICATION_EMAIL",
+    "NOTIFICATION_EMAIL_FROM",
+    "NOTIFICATION_EMAIL_MAILGUN",
+    "NOTIFICATION_EMAIL_MAILGUN_API_KEY",
+    "NOTIFICATION_EMAIL_MAILGUN_DOMAIN_NAME",
+    "NOTIFICATION_EMAIL_SENDGRID",
+    "NOTIFICATION_EMAIL_SENDGRID_API_KEY",
+    "NOTIFICATION_EMAIL_SES",
+    "NOTIFICATION_EMAIL_SES_ACCESS_KEY_ID",
+    "NOTIFICATION_EMAIL_SES_REGION",
+    "NOTIFICATION_EMAIL_SES_SECRET_ACCESS_KEY",
+    "NOTIFICATION_EMAIL_SES_SESSION_TOKEN",
+    "NOTIFICATION_EMAIL_SMTP",
+    "NOTIFICATION_EMAIL_SMTP_HOST",
+    "NOTIFICATION_EMAIL_SMTP_PASSWORD",
+    "NOTIFICATION_EMAIL_SMTP_PORT",
+    "NOTIFICATION_EMAIL_SMTP_USERNAME",
+    "NOTIFICATION_EMAIL_SPARKPOST",
+    "NOTIFICATION_EMAIL_SPARKPOST_API_KEY",
+    "NOTIFICATION_EMAIL_STRATEGY",
+    "NOTIFICATION_EMAIL_TO",
+    "NOTIFICATION_GOOGLE_CHAT_WEBHOOK_URL",
+    "NOTIFICATION_GOTIFY",
+    "NOTIFICATION_GOTIFY_PRIORITY",
+    "NOTIFICATION_GOTIFY_TITLE",
+    "NOTIFICATION_GOTIFY_TOKEN",
+    "NOTIFICATION_GOTIFY_URL",
+    "NOTIFICATION_LARK",
+    "NOTIFICATION_LARK_BOT_WEBHOOK",
+    "NOTIFICATION_MASTODON",
+    "NOTIFICATION_MASTODON_API_KEY",
+    "NOTIFICATION_MASTODON_INSTANCE_URL",
+    "NOTIFICATION_MASTODON_TOOT_VISIBILITY",
+    "NOTIFICATION_MISSKEY",
+    "NOTIFICATION_MISSKEY_API_KEY",
+    "NOTIFICATION_MISSKEY_CHAT",
+    "NOTIFICATION_MISSKEY_CHAT_USER_ID",
+    "NOTIFICATION_MISSKEY_INSTANCE_URL",
+    "NOTIFICATION_MISSKEY_NOTE",
+    "NOTIFICATION_MISSKEY_NOTE_VISIBILITY",
+    "NOTIFICATION_MISSKEY_NOTE_VISIBLE_USER_IDS",
+    "NOTIFICATION_SLACK",
+    "NOTIFICATION_SLACK_STRATEGY",
+    "NOTIFICATION_SLACK_WEBHOOK_URL",
+    "NOTIFICATION_SMS_46ELKS",
+    "NOTIFICATION_SMS_46ELKS_API_PASSWORD",
+    "NOTIFICATION_SMS_46ELKS_API_USERNAME",
+    "NOTIFICATION_SMS_CALLR",
+    "NOTIFICATION_SMS_CALLR_LOGIN",
+    "NOTIFICATION_SMS_CALLR_PASSWORD",
+    "NOTIFICATION_SMS_CLICKATELL",
+    "NOTIFICATION_SMS_CLICKATELL_API_KEY",
+    "NOTIFICATION_SMS_FROM",
+    "NOTIFICATION_SMS_INFOBIP",
+    "NOTIFICATION_SMS_INFOBIP_PASSWORD",
+    "NOTIFICATION_SMS_INFOBIP_USERNAME",
+    "NOTIFICATION_SMS_NEXMO",
+    "NOTIFICATION_SMS_NEXMO_API_KEY",
+    "NOTIFICATION_SMS_NEXMO_API_SECRET",
+    "NOTIFICATION_SMS_OVH",
+    "NOTIFICATION_SMS_OVH_ACCOUNT",
+    "NOTIFICATION_SMS_OVH_APP_KEY",
+    "NOTIFICATION_SMS_OVH_APP_SECRET",
+    "NOTIFICATION_SMS_OVH_CONSUMER_KEY",
+    "NOTIFICATION_SMS_OVH_HOST",
+    "NOTIFICATION_SMS_PLIVO",
+    "NOTIFICATION_SMS_PLIVO_AUTH_ID",
+    "NOTIFICATION_SMS_PLIVO_AUTH_TOKEN",
+    "NOTIFICATION_SMS_STRATEGY",
+    "NOTIFICATION_SMS_TO",
+    "NOTIFICATION_SMS_TWILIO",
+    "NOTIFICATION_SMS_TWILIO_ACCOUNT_SID",
+    "NOTIFICATION_SMS_TWILIO_AUTH_TOKEN",
+    "NOTIFICATION_TEAMS",
+    "NOTIFICATION_TEAMS_WEBHOOK_URL",
+    "NOTIFICATION_TELEGRAM",
+    "NOTIFICATION_TELEGRAM_BOT_KEY",
+    "NOTIFICATION_TELEGRAM_CHAT_ID",
+    "NOTIFICATION_ZULIP_API_EMAIL",
+    "NOTIFICATION_ZULIP_API_KEY",
+    "NOTIFICATION_ZULIP_MESSAGE_URL",
+    "RANDOM_MAX",
+    "RANDOM_MIN",
+    "USER_AGENT",
+];
+const invalidSecretNameError = (name) => new Error(`Invalid secret name in .upptimerc.yml secrets allowlist: ${name}. ` +
+    "GitHub secret names must contain only uppercase letters, numbers, and underscores, " +
+    "must not start with a number, and must not start with GITHUB_.");
+const validateSecretNames = (names) => {
+    if (!Array.isArray(names)) {
+        throw new Error("Invalid .upptimerc.yml secrets allowlist: expected a list of GitHub secret names.");
+    }
+    const validatedNames = [];
+    for (const name of names) {
+        if (typeof name !== "string") {
+            throw new Error("Invalid .upptimerc.yml secrets allowlist: expected every secret name to be a string.");
+        }
+        if (!SECRET_NAME_PATTERN.test(name) || name.startsWith("GITHUB_")) {
+            throw invalidSecretNameError(name);
+        }
+        if (!validatedNames.includes(name))
+            validatedNames.push(name);
+    }
+    return validatedNames;
+};
+exports.validateSecretNames = validateSecretNames;
+const collectSecretReferences = (value, names) => {
+    if (typeof value !== "string")
+        return;
+    for (const match of value.matchAll(DISCOVERABLE_SECRET_PATTERN)) {
+        const name = match[1];
+        if (!name.startsWith("GITHUB_") && !EXCLUDED_DISCOVERED_NAMES.has(name)) {
+            names.add(name);
+        }
+    }
+};
+const getConfiguredSecretReferences = (config) => {
+    const names = new Set();
+    for (const site of config.sites || []) {
+        collectSecretReferences(site.url, names);
+        for (const header of site.headers || [])
+            collectSecretReferences(header, names);
+        collectSecretReferences(site.body, names);
+        collectSecretReferences(site.port, names);
+        collectSecretReferences(site.__dangerous__body_down, names);
+        collectSecretReferences(site.__dangerous__body_down_if_text_missing, names);
+        collectSecretReferences(site.__dangerous__body_degraded, names);
+        collectSecretReferences(site.__dangerous__body_degraded_if_text_missing, names);
+    }
+    return [...names].sort();
+};
+exports.getConfiguredSecretReferences = getConfiguredSecretReferences;
+const getWorkflowSecretNames = (config) => {
+    if (config.secrets !== undefined)
+        return (0, exports.validateSecretNames)(config.secrets);
+    return [
+        ...new Set([...exports.UPPTIME_RUNTIME_SECRET_NAMES, ...(0, exports.getConfiguredSecretReferences)(config)]),
+    ].sort();
+};
+exports.getWorkflowSecretNames = getWorkflowSecretNames;
+const renderSecretsContext = (names) => {
+    const validatedNames = (0, exports.validateSecretNames)(names);
+    const secretPairs = validatedNames
+        .map((name) => `${JSON.stringify(name)}:\${{ toJson(secrets.${name}) }}`)
+        .join(",");
+    // GitHub Actions evaluates expressions inside YAML string scalars, so this
+    // keeps JSON structure static while each allowlisted secret is resolved at runtime.
+    return `'{${secretPairs}}'`;
+};
+exports.renderSecretsContext = renderSecretsContext;
+//# sourceMappingURL=workflow-secrets.js.map
+
+/***/ }),
+
 /***/ 5761:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.uptimeCiWorkflow = exports.updatesCiWorkflow = exports.updateTemplateCiWorkflow = exports.summaryCiWorkflow = exports.siteCiWorkflow = exports.setupCiWorkflow = exports.responseTimeCiWorkflow = exports.getSecretsContext = exports.graphsCiWorkflow = exports.getUptimeMonitorVersion = void 0;
+exports.uptimeCiWorkflow = exports.updatesCiWorkflow = exports.updateTemplateCiWorkflow = exports.summaryCiWorkflow = exports.siteCiWorkflow = exports.setupCiWorkflow = exports.responseTimeCiWorkflow = exports.graphsCiWorkflow = exports.getUptimeMonitorVersion = void 0;
 const config_1 = __nccwpck_require__(99153);
 const constants_1 = __nccwpck_require__(71563);
 const github_1 = __nccwpck_require__(38066);
+const workflow_secrets_1 = __nccwpck_require__(71921);
 let release = "master"; // undefined;
 const getUptimeMonitorVersion = async () => {
     if (release)
@@ -1492,6 +1777,10 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: \${{ github.head_ref || github.ref_name }}
+      - name: Setup Node.js for graphs
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
       - name: Generate graphs
         uses: JFronny/uptime-monitor@${await (0, exports.getUptimeMonitorVersion)()}
         with:
@@ -1510,32 +1799,6 @@ const getHasIpV6Site = async () => {
         console.log("No IPv6 sites detected, skipping WARP setup step", JSON.stringify(config.sites));
     return hasIpV6;
 };
-const SECRET_NAME_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
-const getSecretsContext = (config) => {
-    if (config.secrets === undefined)
-        return "${{ toJson(secrets) }}";
-    if (!Array.isArray(config.secrets)) {
-        throw new Error("Invalid .upptimerc.yml secrets allowlist: expected a list of GitHub secret names.");
-    }
-    const configuredSecrets = [...new Set(config.secrets)];
-    for (const secret of configuredSecrets) {
-        if (typeof secret !== "string") {
-            throw new Error("Invalid .upptimerc.yml secrets allowlist: expected every secret name to be a string.");
-        }
-        if (!SECRET_NAME_PATTERN.test(secret) || /^GITHUB_/.test(secret)) {
-            throw new Error(`Invalid secret name in .upptimerc.yml secrets allowlist: ${secret}. ` +
-                "GitHub secret names must contain only uppercase letters, numbers, and underscores, " +
-                "must not start with a number, and must not start with GITHUB_.");
-        }
-    }
-    const secretPairs = configuredSecrets
-        .map((secret) => `${JSON.stringify(secret)}:\${{ toJson(secrets.${secret}) }}`)
-        .join(",");
-    // GitHub Actions evaluates expressions inside YAML string scalars, so this
-    // keeps JSON structure static while each allowlisted secret is resolved at runtime.
-    return `'{${secretPairs}}'`;
-};
-exports.getSecretsContext = getSecretsContext;
 const responseTimeCiWorkflow = async () => {
     const config = await (0, config_1.getConfig)();
     const workflowSchedule = config.workflowSchedule || {};
@@ -1567,12 +1830,15 @@ jobs:
           command: "response-time"
         env:
           GH_PAT: \${{ github.token }}
-          SECRETS_CONTEXT: ${(0, exports.getSecretsContext)(config)}
+          # Configure the secret allowlist in .upptimerc.yml; do not edit this workflow directly.
+          SECRETS_CONTEXT: ${(0, workflow_secrets_1.renderSecretsContext)((0, workflow_secrets_1.getWorkflowSecretNames)(config))}
 `;
 };
 exports.responseTimeCiWorkflow = responseTimeCiWorkflow;
 const setupCiWorkflow = async () => {
     const config = await (0, config_1.getConfig)();
+    const commitMessages = config.commitMessages || {};
+    const statusWebsite = config["status-website"] || {};
     return `${await introComment()}
 
 name: Setup CI
@@ -1594,45 +1860,53 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: \${{ github.head_ref || github.ref_name }}
-          token: \${{ secrets.USER_PAT }}
+          token: \${{ secrets.GH_PAT || github.token }}
       - name: Update template
         uses: JFronny/uptime-monitor@${await (0, exports.getUptimeMonitorVersion)()}
         with:
           command: "update-template"
         env:
-          GH_PAT: \${{ secrets.USER_PAT }}
+          GH_PAT: \${{ secrets.GH_PAT || github.token }}
       - name: Update response time
         uses: JFronny/uptime-monitor@${await (0, exports.getUptimeMonitorVersion)()}
         with:
           command: "response-time"
         env:
-          GH_PAT: \${{ github.token }}
-          SECRETS_CONTEXT: ${(0, exports.getSecretsContext)(config)}
+          GH_PAT: \${{ secrets.GH_PAT || github.token }}
+          SECRETS_CONTEXT: ${(0, workflow_secrets_1.renderSecretsContext)((0, workflow_secrets_1.getWorkflowSecretNames)(config))}
       - name: Update summary in README
         uses: JFronny/uptime-monitor@${await (0, exports.getUptimeMonitorVersion)()}
         with:
           command: "readme"
         env:
-          GH_PAT: \${{ github.token }}
+          GH_PAT: \${{ secrets.GH_PAT || github.token }}
       - name: Generate graphs
-        uses: JFronny/uptime-monitor@${await (0, exports.getUptimeMonitorVersion)()}
+        uses: benc-uk/workflow-dispatch@v1
         with:
-          command: "graphs"
-        env:
-          GH_PAT: \${{ github.token }}
+          workflow: Graphs CI
+          token: \${{ secrets.GH_PAT || github.token }}
       - name: Generate site
         uses: JFronny/uptime-monitor@${await (0, exports.getUptimeMonitorVersion)()}
         with:
           command: "site"
         env:
-          GH_PAT: \${{ github.token }}
-${await publishPage(config)}
+          GH_PAT: \${{ secrets.GH_PAT || github.token }}
+      - uses: peaceiris/actions-gh-pages@v4
+        name: GitHub Pages Deploy
+        with:
+          github_token: \${{ secrets.GH_PAT || github.token }}
+          publish_dir: "site/status-page/__sapper__/export/"
+          force_orphan: "${statusWebsite.singleCommit || false}"
+          user_name: "${commitMessages.commitAuthorName || "Upptime Bot"}"
+          user_email: "${commitMessages.commitAuthorEmail || "73812536+upptime-bot@users.noreply.github.com"}"
 `;
 };
 exports.setupCiWorkflow = setupCiWorkflow;
 const siteCiWorkflow = async () => {
     const config = await (0, config_1.getConfig)();
     const workflowSchedule = config.workflowSchedule || {};
+    const commitMessages = config.commitMessages || {};
+    const statusWebsite = config["status-website"] || {};
     return `${await introComment()}
 
 name: Static Site CI
@@ -1796,7 +2070,8 @@ jobs:
           command: "update"
         env:
           GH_PAT: \${{ github.token }}
-          SECRETS_CONTEXT: ${(0, exports.getSecretsContext)(config)}
+          # Configure the secret allowlist in .upptimerc.yml; do not edit this workflow directly.
+          SECRETS_CONTEXT: ${(0, workflow_secrets_1.renderSecretsContext)((0, workflow_secrets_1.getWorkflowSecretNames)(config))}
 `;
 };
 exports.uptimeCiWorkflow = uptimeCiWorkflow;
@@ -1821,11 +2096,7 @@ const summary_1 = __nccwpck_require__(84676);
 const update_1 = __nccwpck_require__(75511);
 const update_template_1 = __nccwpck_require__(58327);
 const token = (0, secrets_1.getSecret)("GH_PAT") || (0, core_1.getInput)("token") || (0, secrets_1.getSecret)("GITHUB_TOKEN");
-const SECRETS_CONTEXT = process.env.SECRETS_CONTEXT || "{}";
-const allSecrets = JSON.parse(SECRETS_CONTEXT);
-Object.keys(allSecrets).forEach((key) => {
-    process.env[key] = allSecrets[key];
-});
+(0, secrets_1.hydrateSecretsEnvironment)();
 const run = async () => {
     if (!token)
         throw new Error("GitHub token not found");
@@ -1944,7 +2215,7 @@ exports.generateSite = generateSite;
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.generateSummary = exports.normalizeWorkflowBadges = void 0;
+exports.generateSummary = exports.deleteRecentStatusIssues = exports.normalizeWorkflowBadges = void 0;
 const fs_extra_1 = __nccwpck_require__(5630);
 const path_1 = __nccwpck_require__(71017);
 const prettier_1 = __nccwpck_require__(54588);
@@ -1982,6 +2253,42 @@ const normalizeWorkflowBadges = (readmeContent, owner, repo) => workflowBadges.r
     return content.replace(workflowBadgePattern, workflowBadgeMarkdown(owner, repo, badge));
 }, readmeContent);
 exports.normalizeWorkflowBadges = normalizeWorkflowBadges;
+const recentIssueWindowMs = 15 * 60 * 1000;
+const deleteRecentStatusIssues = async (octokit, owner, repo, now = Date.now()) => {
+    const cutoff = now - recentIssueWindowMs;
+    const issuesRecentlyClosed = await octokit.paginate(octokit.issues.listForRepo, {
+        owner,
+        repo,
+        state: "closed",
+        labels: "status",
+        // `since` filters by updated_at, so the closed_at check below is still required.
+        since: new Date(cutoff).toISOString(),
+        per_page: 100,
+    });
+    console.log("Found recently closed issues", issuesRecentlyClosed.length);
+    for await (const issue of issuesRecentlyClosed) {
+        const closedAt = issue.closed_at ? new Date(issue.closed_at).getTime() : 0;
+        if (closedAt >= cutoff &&
+            // If this issue was closed within 15 minutes
+            closedAt - new Date(issue.created_at).getTime() < recentIssueWindowMs &&
+            // It has 1 comment (the default Upptime one)
+            issue.comments === 1) {
+            try {
+                console.log("Trying to delete issue", issue.number, issue.node_id);
+                const result = await octokit.graphql(`mutation deleteIssue($issueId: ID!) {
+            deleteIssue(input: { issueId: $issueId }) {
+              clientMutationId
+            }
+          }`, { issueId: issue.node_id });
+                console.log("Success", result);
+            }
+            catch (error) {
+                console.log("Error deleting this issue", error);
+            }
+        }
+    }
+};
+exports.deleteRecentStatusIssues = deleteRecentStatusIssues;
 const generateSummary = async () => {
     if (!(await (0, init_check_1.shouldContinue)()))
         return;
@@ -2163,7 +2470,7 @@ ${config.summaryEndHtmlComment || "<!--end: status pages-->"}${endText}`;
     await (0, fs_extra_1.writeFile)((0, path_1.join)(".", "README.md"), (0, prettier_1.format)(readmeContent, { parser: "markdown" }));
     await (0, fs_extra_1.writeFile)((0, path_1.join)(".", ".gitattributes"), "# Markdown\n*.md linguist-detectable=true\n*.md linguist-documentation=false\n\n# JSON\n*.json linguist-detectable=true\n\n# YAML\n*.yml linguist-detectable=true\n");
     (0, git_1.commit)((config.commitMessages || {}).readmeContent ||
-        ":pencil: Update summary in README [skip ci] [upptime]", (config.commitMessages || {}).commitAuthorName, (config.commitMessages || {}).commitAuthorEmail);
+        ":pencil: Update summary in README [skip ci] [upptime]", (config.commitMessages || {}).commitAuthorName, (config.commitMessages || {}).commitAuthorEmail, (config.commitMessages || {}).signoff);
     // If there are any old workflows left, fix them
     const workflows = (await (0, fs_extra_1.readdir)((0, path_1.join)(".", ".github", "workflows"))).filter((i) => i.endsWith(".yml"));
     for await (const workflow of workflows) {
@@ -2176,42 +2483,12 @@ ${config.summaryEndHtmlComment || "<!--end: status pages-->"}${endText}`;
     }
     await (0, fs_extra_1.writeFile)((0, path_1.join)(".", "history", "summary.json"), JSON.stringify(pageStatuses, null, 2));
     (0, git_1.commit)((config.commitMessages || {}).summaryJson ||
-        ":card_file_box: Update status summary [skip ci] [upptime]", (config.commitMessages || {}).commitAuthorName, (config.commitMessages || {}).commitAuthorEmail);
+        ":card_file_box: Update status summary [skip ci] [upptime]", (config.commitMessages || {}).commitAuthorName, (config.commitMessages || {}).commitAuthorEmail, (config.commitMessages || {}).signoff);
     (0, git_1.push)();
     if (!config.skipDeleteIssues) {
         // Find all the opened issues that shouldn't have opened
         // Say, Upptime found a down monitor and it was back up within 5 min
-        const issuesRecentlyClosed = await octokit.issues.listForRepo({
-            owner,
-            repo,
-            state: "closed",
-            labels: "status",
-            per_page: 10,
-        });
-        console.log("Found recently closed issues", issuesRecentlyClosed.data.length);
-        for await (const issue of issuesRecentlyClosed.data) {
-            if (issue.closed_at &&
-                // If this issue was closed within 15 minutes
-                new Date(issue.closed_at).getTime() -
-                    new Date(issue.created_at).getTime() <
-                    900000 &&
-                // It has 1 comment (the default Upptime one)
-                issue.comments === 1) {
-                try {
-                    console.log("Trying to delete issue", issue.number, issue.node_id);
-                    const result = await octokit.graphql(`
-      mutation deleteIssue {
-        deleteIssue(input:{issueId:"${issue.node_id}"}) {
-          clientMutationId
-        }
-      }`);
-                    console.log("Success", result);
-                }
-                catch (error) {
-                    console.log("Error deleting this issue", error);
-                }
-            }
-        }
+        await (0, exports.deleteRecentStatusIssues)(octokit, owner, repo);
     }
 };
 exports.generateSummary = generateSummary;
@@ -2301,7 +2578,7 @@ const updateTemplate = async () => {
     catch (error) {
         console.log(error);
     }
-    (0, git_1.commit)(`:arrow_up: Update @upptime to ${await (0, workflows_1.getUptimeMonitorVersion)()}`);
+    (0, git_1.commit)(`:arrow_up: Update @upptime to ${await (0, workflows_1.getUptimeMonitorVersion)()}`, (config.commitMessages || {}).commitAuthorName, (config.commitMessages || {}).commitAuthorEmail, (config.commitMessages || {}).signoff);
     (0, git_1.push)();
     console.log("All done!");
 };
@@ -2362,6 +2639,16 @@ function getHumanReadableTimeDifference(startTime) {
     if (diffMinutes > 0)
         result.push(`${diffMinutes.toLocaleString()} ${diffMinutes > 1 ? "minutes" : "minute"}`);
     return result.join(", ");
+}
+function sanitizeTcpPingResultForLog(tcpResult) {
+    const { address: _address, port: _port, ...safeResult } = tcpResult;
+    return safeResult;
+}
+function redactEnvironmentVariableReferences(value) {
+    return value.replace(/\$[A-Za-z_][A-Za-z0-9_]*/g, "[redacted]");
+}
+function getNotificationSiteUrl(site) {
+    return redactEnvironmentVariableReferences(site.url);
 }
 function getStatusFromHttpResult(site, httpCode, data, responseTime) {
     const expectedStatusCodes = (site.expectedStatusCodes || [
@@ -2428,7 +2715,7 @@ const update = async (shouldCommit = false) => {
     const config = await (0, config_1.getConfig)();
     const octokit = await (0, github_1.getOctokit)();
     let hasDelta = false;
-    const _ongoingMaintenanceEvents = await octokit.issues.listForRepo({
+    const _ongoingMaintenanceEvents = await (0, github_1.retryTransientGitHubRequest)(() => octokit.issues.listForRepo({
         owner,
         repo,
         state: "open",
@@ -2436,7 +2723,7 @@ const update = async (shouldCommit = false) => {
         sort: "created",
         direction: "desc",
         labels: "maintenance",
-    });
+    }));
     console.log("Found ongoing maintenance events", _ongoingMaintenanceEvents.data.length);
     const ongoingMaintenanceEvents = [];
     for await (const incident of _ongoingMaintenanceEvents.data) {
@@ -2498,6 +2785,7 @@ const update = async (shouldCommit = false) => {
             await delay(config.delay);
         }
         const slug = (0, slug_1.getSiteSlug)(site);
+        const notificationSiteUrl = getNotificationSiteUrl(site);
         let currentStatus = "unknown";
         let startTime = new Date();
         try {
@@ -2541,16 +2829,25 @@ const update = async (shouldCommit = false) => {
                         inProgressUpdates: false,
                         limit: 1,
                         locations: [{ magic: site.location || "world" }],
-                        measurementOptions: {
-                            ipVersion: site.ipv6 ? globalping_1.IpVersion[6] : globalping_1.IpVersion[4],
-                        },
+                        ...((0, net_1.isIP)(url.hostname)
+                            ? {}
+                            : {
+                                measurementOptions: {
+                                    ipVersion: site.ipv6 ? globalping_1.IpVersion[6] : globalping_1.IpVersion[4],
+                                },
+                            }),
                     });
                     if (res.ok) {
                         console.log("Fetching globalping measurement", res.data.id);
                         const measurement = await client.awaitMeasurement(res.data.id);
                         if (measurement.ok) {
                             const result = measurement.data.results[0].result;
-                            const responseTime = result.stats.avg || 0;
+                            if (result.status === "failed" || result.status === "offline") {
+                                console.log("Globalping ping measurement failed:", result.status);
+                                return { result: { httpCode: 0 }, responseTime: "0", status: "down" };
+                            }
+                            const finishedResult = result;
+                            const responseTime = finishedResult.stats.avg || 0;
                             let status = "up";
                             if (responseTime > (site.maxResponseTime || 60000)) {
                                 status = "degraded";
@@ -2603,18 +2900,23 @@ const update = async (shouldCommit = false) => {
                         const measurement = await client.awaitMeasurement(res.data.id);
                         if (measurement.ok) {
                             const result = measurement.data.results[0].result;
+                            if (result.status === "failed" || result.status === "offline") {
+                                console.log("Globalping HTTP measurement failed:", result.status);
+                                return { result: { httpCode: 0 }, responseTime: "0", status: "down" };
+                            }
+                            const finishedResult = result;
                             if (site.check === "ssl") {
                                 return {
                                     result: { httpCode: 200 },
                                     responseTime: "0",
-                                    status: getStatusFromCertificateExpiresAt(result.tls?.expiresAt),
+                                    status: getStatusFromCertificateExpiresAt(finishedResult.tls?.expiresAt),
                                 };
                             }
-                            const responseTime = result.timings.total || 0;
-                            const status = getStatusFromHttpResult(site, result.statusCode, result.rawBody || "", responseTime);
+                            const responseTime = finishedResult.timings.total || 0;
+                            const status = getStatusFromHttpResult(site, finishedResult.statusCode, finishedResult.rawBody || "", responseTime);
                             return {
                                 result: {
-                                    httpCode: result.statusCode,
+                                    httpCode: finishedResult.statusCode,
                                 },
                                 responseTime: responseTime.toFixed(0),
                                 status,
@@ -2683,7 +2985,7 @@ const update = async (shouldCommit = false) => {
                         if (attempt > 1) {
                             console.log(`tcp-ping succeeded on attempt ${attempt}`);
                         }
-                        console.log("Got result", tcpResult);
+                        console.log("Got result", sanitizeTcpPingResultForLog(tcpResult));
                         let responseTime = (tcpResult.avg || 0).toFixed(0);
                         if (parseInt(responseTime) > (site.maxResponseTime || 60000))
                             status = "degraded";
@@ -2874,7 +3176,7 @@ generator: Upptime <https://github.com/upptime/upptime>
                     .replace("$SITE_METHOD", site.method || "GET")
                     .replace("$STATUS", status)
                     .replace("$RESPONSE_CODE", result.httpCode.toString())
-                    .replace("$RESPONSE_TIME", responseTime), (config.commitMessages || {}).commitAuthorName, (config.commitMessages || {}).commitAuthorEmail);
+                    .replace("$RESPONSE_TIME", responseTime), (config.commitMessages || {}).commitAuthorName, (config.commitMessages || {}).commitAuthorEmail, (config.commitMessages || {}).signoff);
                 const lastCommitSha = (0, git_1.lastCommit)();
                 if (currentStatus !== status) {
                     console.log("Status is different", currentStatus, "to", status);
@@ -2929,10 +3231,10 @@ generator: Upptime <https://github.com/upptime/upptime>
                                 const downmsg = (await (0, secrets_1.getSecret)("NOTIFICATIONS_DOWN_MESSAGE"))
                                     ? ((0, secrets_1.getSecret)("NOTIFICATIONS_DOWN_MESSAGE") || "")
                                         .replace("$SITE_NAME", site.name)
-                                        .replace("$SITE_URL", `(${site.url})`)
+                                        .replace("$SITE_URL", `(${notificationSiteUrl})`)
                                         .replace("$ISSUE_URL", `${newIssue.data.html_url}`)
                                         .replace("$RESPONSE_CODE", result.httpCode.toString())
-                                    : `$EMOJI ${site.name} (${site.url}) is $STATUS : ${newIssue.data.html_url}`;
+                                    : `$EMOJI ${site.name} (${notificationSiteUrl}) is $STATUS : ${newIssue.data.html_url}`;
                                 await (0, notifme_1.sendNotification)(status === "down"
                                     ? `${downmsg
                                         .replace("$STATUS", "**down**")
@@ -2981,8 +3283,8 @@ generator: Upptime <https://github.com/upptime/upptime>
                             const upmsg = (await (0, secrets_1.getSecret)("NOTIFICATIONS_UP_MESSAGE"))
                                 ? ((0, secrets_1.getSecret)("NOTIFICATIONS_UP_MESSAGE") || "")
                                     .replace("$SITE_NAME", site.name)
-                                    .replace("$SITE_URL", `(${site.url})`)
-                                : `$EMOJI ${site.name} (${site.url}) $STATUS`;
+                                    .replace("$SITE_URL", `(${notificationSiteUrl})`)
+                                : `$EMOJI ${site.name} (${notificationSiteUrl}) $STATUS`;
                             await (0, notifme_1.sendNotification)(upmsg
                                 .replace("$EMOJI", `${config.commitPrefixStatusUp || "🟩"}`)
                                 .replace("$STATUS", `${issues.data[0].title.includes("degraded")
@@ -3011,7 +3313,7 @@ generator: Upptime <https://github.com/upptime/upptime>
     }
     (0, git_1.push)();
     if (hasDelta)
-        (0, summary_1.generateSummary)();
+        await (0, summary_1.generateSummary)();
 };
 exports.update = update;
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

@@ -1,3 +1,173 @@
+## v1.44.1 (2026-09-21)
+
+[📝 Release notes](https://github.com/upptime/uptime-monitor/releases/tag/v1.44.1) · [💻 Compare](https://github.com/upptime/uptime-monitor/compare/v1.44.0...v1.44.1) · [🔖 Tag](https://github.com/upptime/uptime-monitor/tree/v1.44.1) · 🗄️ Archive ([zip](https://github.com/upptime/uptime-monitor/archive/v1.44.1.zip) · [tar.gz](https://github.com/upptime/uptime-monitor/archive/v1.44.1.tar.gz))
+
+### 🔒 Security issues
+
+- [`c84002a`](https://github.com/upptime/uptime-monitor/commit/c84002a)  Update js-yaml to 4.3.2 (#321)
+(Issues: [`#321`](https://github.com/upptime/uptime-monitor/issues/321))
+
+## v1.44.0 (2026-09-07)
+
+[📝 Release notes](https://github.com/upptime/uptime-monitor/releases/tag/v1.44.0) · [💻 Compare](https://github.com/upptime/uptime-monitor/compare/v1.43.16...v1.44.0) · [🔖 Tag](https://github.com/upptime/uptime-monitor/tree/v1.44.0) · 🗄️ Archive ([zip](https://github.com/upptime/uptime-monitor/archive/v1.44.0.zip) · [tar.gz](https://github.com/upptime/uptime-monitor/archive/v1.44.0.tar.gz))
+
+### ✨ New features
+
+- [`078dc45`](https://github.com/upptime/uptime-monitor/commit/078dc45)  Support GitHub App tokens in generated workflows (#320)
+(Issues: [`#320`](https://github.com/upptime/uptime-monitor/issues/320))
+
+## v1.43.16 (2026-08-27)
+
+[📝 Release notes](https://github.com/upptime/uptime-monitor/releases/tag/v1.43.16) · [💻 Compare](https://github.com/upptime/uptime-monitor/compare/v1.43.15...v1.43.16) · [🔖 Tag](https://github.com/upptime/uptime-monitor/tree/v1.43.16) · 🗄️ Archive ([zip](https://github.com/upptime/uptime-monitor/archive/v1.43.16.zip) · [tar.gz](https://github.com/upptime/uptime-monitor/archive/v1.43.16.tar.gz))
+
+### 🐛 Bug fixes
+
+- [`585da15`](https://github.com/upptime/uptime-monitor/commit/585da15)  Handle failed Globalping probe results (#319)
+(Issues: [`#319`](https://github.com/upptime/uptime-monitor/issues/319))
+
+## v1.43.15 (2026-08-18)
+
+[📝 Release notes](https://github.com/upptime/uptime-monitor/releases/tag/v1.43.15) · [💻 Compare](https://github.com/upptime/uptime-monitor/compare/v1.43.14...v1.43.15) · [🔖 Tag](https://github.com/upptime/uptime-monitor/tree/v1.43.15) · 🗄️ Archive ([zip](https://github.com/upptime/uptime-monitor/archive/v1.43.15.zip) · [tar.gz](https://github.com/upptime/uptime-monitor/archive/v1.43.15.tar.gz))
+
+### 🐛 Bug fixes
+
+- [`2213779`](https://github.com/upptime/uptime-monitor/commit/2213779)  Fix Globalping IP ping targets (#318)
+(Issues: [`#318`](https://github.com/upptime/uptime-monitor/issues/318))
+
+## v1.43.14 (2026-08-14)
+
+[📝 Release notes](https://github.com/upptime/uptime-monitor/releases/tag/v1.43.14) · [💻 Compare](https://github.com/upptime/uptime-monitor/compare/v1.43.13...v1.43.14) · [🔖 Tag](https://github.com/upptime/uptime-monitor/tree/v1.43.14) · 🗄️ Archive ([zip](https://github.com/upptime/uptime-monitor/archive/v1.43.14.zip) · [tar.gz](https://github.com/upptime/uptime-monitor/archive/v1.43.14.tar.gz))
+
+### 🔒 Security issues
+
+- [`68593b0`](https://github.com/upptime/uptime-monitor/commit/68593b0)  Update js-yaml to 4.3.1 (#316)
+(Issues: [`#316`](https://github.com/upptime/uptime-monitor/issues/316))
+
+## v1.43.13 (2026-08-01)
+
+[📝 Release notes](https://github.com/upptime/uptime-monitor/releases/tag/v1.43.13) · [💻 Compare](https://github.com/upptime/uptime-monitor/compare/v1.43.12...v1.43.13) · [🔖 Tag](https://github.com/upptime/uptime-monitor/tree/v1.43.13) · 🗄️ Archive ([zip](https://github.com/upptime/uptime-monitor/archive/v1.43.13.zip) · [tar.gz](https://github.com/upptime/uptime-monitor/archive/v1.43.13.tar.gz))
+
+### 🐛 Bug fixes
+
+- [`57074ea`](https://github.com/upptime/uptime-monitor/commit/57074ea)  Fix maintenance reliability edge cases
+
+## v1.43.12 (2026-07-25)
+
+[📝 Release notes](https://github.com/upptime/uptime-monitor/releases/tag/v1.43.12) · [💻 Compare](https://github.com/upptime/uptime-monitor/compare/v1.43.11...v1.43.12) · [🔖 Tag](https://github.com/upptime/uptime-monitor/tree/v1.43.12) · 🗄️ Archive ([zip](https://github.com/upptime/uptime-monitor/archive/v1.43.12.zip) · [tar.gz](https://github.com/upptime/uptime-monitor/archive/v1.43.12.tar.gz))
+
+### 🔒 Security issues
+
+- [`f7e8dde`](https://github.com/upptime/uptime-monitor/commit/f7e8dde)  Update fast-xml-parser to 5.10.1 (#313)
+(Issues: [`#313`](https://github.com/upptime/uptime-monitor/issues/313))
+
+## v1.43.11 (2026-07-23)
+
+[📝 Release notes](https://github.com/upptime/uptime-monitor/releases/tag/v1.43.11) · [💻 Compare](https://github.com/upptime/uptime-monitor/compare/v1.43.10...v1.43.11) · [🔖 Tag](https://github.com/upptime/uptime-monitor/tree/v1.43.11) · 🗄️ Archive ([zip](https://github.com/upptime/uptime-monitor/archive/v1.43.11.zip) · [tar.gz](https://github.com/upptime/uptime-monitor/archive/v1.43.11.tar.gz))
+
+### 🔒 Security issues
+
+- [`0ae0e69`](https://github.com/upptime/uptime-monitor/commit/0ae0e69)  Harden generated workflow secret access (#312)
+(Issues: [`#312`](https://github.com/upptime/uptime-monitor/issues/312))
+
+## v1.43.10 (2026-07-17)
+
+[📝 Release notes](https://github.com/upptime/uptime-monitor/releases/tag/v1.43.10) · [💻 Compare](https://github.com/upptime/uptime-monitor/compare/v1.43.9...v1.43.10) · [🔖 Tag](https://github.com/upptime/uptime-monitor/tree/v1.43.10) · 🗄️ Archive ([zip](https://github.com/upptime/uptime-monitor/archive/v1.43.10.zip) · [tar.gz](https://github.com/upptime/uptime-monitor/archive/v1.43.10.tar.gz))
+
+### 🐛 Bug fixes
+
+- [`42a950d`](https://github.com/upptime/uptime-monitor/commit/42a950d)  Retry transient GitHub API failures (#311)
+(Issues: [`#311`](https://github.com/upptime/uptime-monitor/issues/311))
+
+## v1.43.9 (2026-07-06)
+
+[📝 Release notes](https://github.com/upptime/uptime-monitor/releases/tag/v1.43.9) · [💻 Compare](https://github.com/upptime/uptime-monitor/compare/v1.43.8...v1.43.9) · [🔖 Tag](https://github.com/upptime/uptime-monitor/tree/v1.43.9) · 🗄️ Archive ([zip](https://github.com/upptime/uptime-monitor/archive/v1.43.9.zip) · [tar.gz](https://github.com/upptime/uptime-monitor/archive/v1.43.9.tar.gz))
+
+### 🔒 Security issues
+
+- [`0c7dd36`](https://github.com/upptime/uptime-monitor/commit/0c7dd36)  Refresh vulnerable transitive dependencies (#309)
+(Issues: [`#309`](https://github.com/upptime/uptime-monitor/issues/309))
+
+## v1.43.8 (2026-07-04)
+
+[📝 Release notes](https://github.com/upptime/uptime-monitor/releases/tag/v1.43.8) · [💻 Compare](https://github.com/upptime/uptime-monitor/compare/v1.43.7...v1.43.8) · [🔖 Tag](https://github.com/upptime/uptime-monitor/tree/v1.43.8) · 🗄️ Archive ([zip](https://github.com/upptime/uptime-monitor/archive/v1.43.8.zip) · [tar.gz](https://github.com/upptime/uptime-monitor/archive/v1.43.8.tar.gz))
+
+### 🐛 Bug fixes
+
+- [`e86cf2a`](https://github.com/upptime/uptime-monitor/commit/e86cf2a)  Set up Node 20 for generated graphs (#308)
+(Issues: [`#308`](https://github.com/upptime/uptime-monitor/issues/308))
+
+## v1.43.7 (2026-07-02)
+
+[📝 Release notes](https://github.com/upptime/uptime-monitor/releases/tag/v1.43.7) · [💻 Compare](https://github.com/upptime/uptime-monitor/compare/v1.43.6...v1.43.7) · [🔖 Tag](https://github.com/upptime/uptime-monitor/tree/v1.43.7) · 🗄️ Archive ([zip](https://github.com/upptime/uptime-monitor/archive/v1.43.7.zip) · [tar.gz](https://github.com/upptime/uptime-monitor/archive/v1.43.7.tar.gz))
+
+### 🔒 Security issues
+
+- [`f0c92a9`](https://github.com/upptime/uptime-monitor/commit/f0c92a9)  Redact secret-backed URLs in notifications (#307)
+(Issues: [`#307`](https://github.com/upptime/uptime-monitor/issues/307))
+
+## v1.43.6 (2026-06-29)
+
+[📝 Release notes](https://github.com/upptime/uptime-monitor/releases/tag/v1.43.6) · [💻 Compare](https://github.com/upptime/uptime-monitor/compare/v1.43.5...v1.43.6) · [🔖 Tag](https://github.com/upptime/uptime-monitor/tree/v1.43.6) · 🗄️ Archive ([zip](https://github.com/upptime/uptime-monitor/archive/v1.43.6.zip) · [tar.gz](https://github.com/upptime/uptime-monitor/archive/v1.43.6.tar.gz))
+
+### 🐛 Bug fixes
+
+- [`66d0cce`](https://github.com/upptime/uptime-monitor/commit/66d0cce)  Fall back when Graphs CI dispatch is not ready (#306)
+(Issues: [`#306`](https://github.com/upptime/uptime-monitor/issues/306))
+
+## v1.43.5 (2026-06-28)
+
+[📝 Release notes](https://github.com/upptime/uptime-monitor/releases/tag/v1.43.5) · [💻 Compare](https://github.com/upptime/uptime-monitor/compare/v1.43.4...v1.43.5) · [🔖 Tag](https://github.com/upptime/uptime-monitor/tree/v1.43.5) · 🗄️ Archive ([zip](https://github.com/upptime/uptime-monitor/archive/v1.43.5.zip) · [tar.gz](https://github.com/upptime/uptime-monitor/archive/v1.43.5.tar.gz))
+
+### 🐛 Bug fixes
+
+- [`737242b`](https://github.com/upptime/uptime-monitor/commit/737242b)  Report notification provider send failures (#305)
+(Issues: [`#305`](https://github.com/upptime/uptime-monitor/issues/305))
+
+## v1.43.4 (2026-06-27)
+
+[📝 Release notes](https://github.com/upptime/uptime-monitor/releases/tag/v1.43.4) · [💻 Compare](https://github.com/upptime/uptime-monitor/compare/v1.43.3...v1.43.4) · [🔖 Tag](https://github.com/upptime/uptime-monitor/tree/v1.43.4) · 🗄️ Archive ([zip](https://github.com/upptime/uptime-monitor/archive/v1.43.4.zip) · [tar.gz](https://github.com/upptime/uptime-monitor/archive/v1.43.4.tar.gz))
+
+### 🐛 Bug fixes
+
+- [`2120991`](https://github.com/upptime/uptime-monitor/commit/2120991)  Use Slack webhook URLs for notifications (#304)
+(Issues: [`#304`](https://github.com/upptime/uptime-monitor/issues/304))
+
+## v1.43.3 (2026-06-26)
+
+[📝 Release notes](https://github.com/upptime/uptime-monitor/releases/tag/v1.43.3) · [💻 Compare](https://github.com/upptime/uptime-monitor/compare/v1.43.2...v1.43.3) · [🔖 Tag](https://github.com/upptime/uptime-monitor/tree/v1.43.3) · 🗄️ Archive ([zip](https://github.com/upptime/uptime-monitor/archive/v1.43.3.zip) · [tar.gz](https://github.com/upptime/uptime-monitor/archive/v1.43.3.tar.gz))
+
+### 🐛 Bug fixes
+
+- [`6972c44`](https://github.com/upptime/uptime-monitor/commit/6972c44)  Send Microsoft Teams Adaptive Cards (#303)
+(Issues: [`#303`](https://github.com/upptime/uptime-monitor/issues/303))
+
+## v1.43.2 (2026-06-23)
+
+[📝 Release notes](https://github.com/upptime/uptime-monitor/releases/tag/v1.43.2) · [💻 Compare](https://github.com/upptime/uptime-monitor/compare/v1.43.1...v1.43.2) · [🔖 Tag](https://github.com/upptime/uptime-monitor/tree/v1.43.2) · 🗄️ Archive ([zip](https://github.com/upptime/uptime-monitor/archive/v1.43.2.zip) · [tar.gz](https://github.com/upptime/uptime-monitor/archive/v1.43.2.tar.gz))
+
+### 🔒 Security issues
+
+- [`5542b75`](https://github.com/upptime/uptime-monitor/commit/5542b75)  Avoid logging tcp-ping endpoints (#302)
+(Issues: [`#302`](https://github.com/upptime/uptime-monitor/issues/302))
+
+## v1.43.1 (2026-06-21)
+
+[📝 Release notes](https://github.com/upptime/uptime-monitor/releases/tag/v1.43.1) · [💻 Compare](https://github.com/upptime/uptime-monitor/compare/v1.43.0...v1.43.1) · [🔖 Tag](https://github.com/upptime/uptime-monitor/tree/v1.43.1) · 🗄️ Archive ([zip](https://github.com/upptime/uptime-monitor/archive/v1.43.1.zip) · [tar.gz](https://github.com/upptime/uptime-monitor/archive/v1.43.1.tar.gz))
+
+### 🐛 Bug fixes
+
+- [`143b22d`](https://github.com/upptime/uptime-monitor/commit/143b22d)  Format Telegram notifications as HTML (#301)
+(Issues: [`#301`](https://github.com/upptime/uptime-monitor/issues/301))
+
+## v1.43.0 (2026-06-19)
+
+[📝 Release notes](https://github.com/upptime/uptime-monitor/releases/tag/v1.43.0) · [💻 Compare](https://github.com/upptime/uptime-monitor/compare/v1.42.7...v1.43.0) · [🔖 Tag](https://github.com/upptime/uptime-monitor/tree/v1.43.0) · 🗄️ Archive ([zip](https://github.com/upptime/uptime-monitor/archive/v1.43.0.zip) · [tar.gz](https://github.com/upptime/uptime-monitor/archive/v1.43.0.tar.gz))
+
+### ✨ New features
+
+- [`4e578fe`](https://github.com/upptime/uptime-monitor/commit/4e578fe)  Add DCO sign-off support (#300)
+(Issues: [`#300`](https://github.com/upptime/uptime-monitor/issues/300))
+
 ## v1.42.7 (2026-06-18)
 
 [📝 Release notes](https://github.com/upptime/uptime-monitor/releases/tag/v1.42.7) · [💻 Compare](https://github.com/upptime/uptime-monitor/compare/v1.42.6...v1.42.7) · [🔖 Tag](https://github.com/upptime/uptime-monitor/tree/v1.42.7) · 🗄️ Archive ([zip](https://github.com/upptime/uptime-monitor/archive/v1.42.7.zip) · [tar.gz](https://github.com/upptime/uptime-monitor/archive/v1.42.7.tar.gz))

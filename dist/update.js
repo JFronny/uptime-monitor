@@ -47,6 +47,16 @@ function getHumanReadableTimeDifference(startTime) {
         result.push(`${diffMinutes.toLocaleString()} ${diffMinutes > 1 ? "minutes" : "minute"}`);
     return result.join(", ");
 }
+function sanitizeTcpPingResultForLog(tcpResult) {
+    const { address: _address, port: _port, ...safeResult } = tcpResult;
+    return safeResult;
+}
+function redactEnvironmentVariableReferences(value) {
+    return value.replace(/\$[A-Za-z_][A-Za-z0-9_]*/g, "[redacted]");
+}
+function getNotificationSiteUrl(site) {
+    return redactEnvironmentVariableReferences(site.url);
+}
 function getStatusFromHttpResult(site, httpCode, data, responseTime) {
     const expectedStatusCodes = (site.expectedStatusCodes || [
         200, 201, 202, 203, 200, 204, 205, 206, 207, 208, 226, 300, 301, 302, 303, 304, 305, 306, 307,
@@ -112,7 +122,7 @@ const update = async (shouldCommit = false) => {
     const config = await (0, config_1.getConfig)();
     const octokit = await (0, github_1.getOctokit)();
     let hasDelta = false;
-    const _ongoingMaintenanceEvents = await octokit.issues.listForRepo({
+    const _ongoingMaintenanceEvents = await (0, github_1.retryTransientGitHubRequest)(() => octokit.issues.listForRepo({
         owner,
         repo,
         state: "open",
@@ -120,7 +130,7 @@ const update = async (shouldCommit = false) => {
         sort: "created",
         direction: "desc",
         labels: "maintenance",
-    });
+    }));
     console.log("Found ongoing maintenance events", _ongoingMaintenanceEvents.data.length);
     const ongoingMaintenanceEvents = [];
     for await (const incident of _ongoingMaintenanceEvents.data) {
@@ -182,6 +192,7 @@ const update = async (shouldCommit = false) => {
             await delay(config.delay);
         }
         const slug = (0, slug_1.getSiteSlug)(site);
+        const notificationSiteUrl = getNotificationSiteUrl(site);
         let currentStatus = "unknown";
         let startTime = new Date();
         try {
@@ -225,16 +236,25 @@ const update = async (shouldCommit = false) => {
                         inProgressUpdates: false,
                         limit: 1,
                         locations: [{ magic: site.location || "world" }],
-                        measurementOptions: {
-                            ipVersion: site.ipv6 ? globalping_1.IpVersion[6] : globalping_1.IpVersion[4],
-                        },
+                        ...((0, net_1.isIP)(url.hostname)
+                            ? {}
+                            : {
+                                measurementOptions: {
+                                    ipVersion: site.ipv6 ? globalping_1.IpVersion[6] : globalping_1.IpVersion[4],
+                                },
+                            }),
                     });
                     if (res.ok) {
                         console.log("Fetching globalping measurement", res.data.id);
                         const measurement = await client.awaitMeasurement(res.data.id);
                         if (measurement.ok) {
                             const result = measurement.data.results[0].result;
-                            const responseTime = result.stats.avg || 0;
+                            if (result.status === "failed" || result.status === "offline") {
+                                console.log("Globalping ping measurement failed:", result.status);
+                                return { result: { httpCode: 0 }, responseTime: "0", status: "down" };
+                            }
+                            const finishedResult = result;
+                            const responseTime = finishedResult.stats.avg || 0;
                             let status = "up";
                             if (responseTime > (site.maxResponseTime || 60000)) {
                                 status = "degraded";
@@ -287,18 +307,23 @@ const update = async (shouldCommit = false) => {
                         const measurement = await client.awaitMeasurement(res.data.id);
                         if (measurement.ok) {
                             const result = measurement.data.results[0].result;
+                            if (result.status === "failed" || result.status === "offline") {
+                                console.log("Globalping HTTP measurement failed:", result.status);
+                                return { result: { httpCode: 0 }, responseTime: "0", status: "down" };
+                            }
+                            const finishedResult = result;
                             if (site.check === "ssl") {
                                 return {
                                     result: { httpCode: 200 },
                                     responseTime: "0",
-                                    status: getStatusFromCertificateExpiresAt(result.tls?.expiresAt),
+                                    status: getStatusFromCertificateExpiresAt(finishedResult.tls?.expiresAt),
                                 };
                             }
-                            const responseTime = result.timings.total || 0;
-                            const status = getStatusFromHttpResult(site, result.statusCode, result.rawBody || "", responseTime);
+                            const responseTime = finishedResult.timings.total || 0;
+                            const status = getStatusFromHttpResult(site, finishedResult.statusCode, finishedResult.rawBody || "", responseTime);
                             return {
                                 result: {
-                                    httpCode: result.statusCode,
+                                    httpCode: finishedResult.statusCode,
                                 },
                                 responseTime: responseTime.toFixed(0),
                                 status,
@@ -367,7 +392,7 @@ const update = async (shouldCommit = false) => {
                         if (attempt > 1) {
                             console.log(`tcp-ping succeeded on attempt ${attempt}`);
                         }
-                        console.log("Got result", tcpResult);
+                        console.log("Got result", sanitizeTcpPingResultForLog(tcpResult));
                         let responseTime = (tcpResult.avg || 0).toFixed(0);
                         if (parseInt(responseTime) > (site.maxResponseTime || 60000))
                             status = "degraded";
@@ -558,7 +583,7 @@ generator: Upptime <https://github.com/upptime/upptime>
                     .replace("$SITE_METHOD", site.method || "GET")
                     .replace("$STATUS", status)
                     .replace("$RESPONSE_CODE", result.httpCode.toString())
-                    .replace("$RESPONSE_TIME", responseTime), (config.commitMessages || {}).commitAuthorName, (config.commitMessages || {}).commitAuthorEmail);
+                    .replace("$RESPONSE_TIME", responseTime), (config.commitMessages || {}).commitAuthorName, (config.commitMessages || {}).commitAuthorEmail, (config.commitMessages || {}).signoff);
                 const lastCommitSha = (0, git_1.lastCommit)();
                 if (currentStatus !== status) {
                     console.log("Status is different", currentStatus, "to", status);
@@ -613,10 +638,10 @@ generator: Upptime <https://github.com/upptime/upptime>
                                 const downmsg = (await (0, secrets_1.getSecret)("NOTIFICATIONS_DOWN_MESSAGE"))
                                     ? ((0, secrets_1.getSecret)("NOTIFICATIONS_DOWN_MESSAGE") || "")
                                         .replace("$SITE_NAME", site.name)
-                                        .replace("$SITE_URL", `(${site.url})`)
+                                        .replace("$SITE_URL", `(${notificationSiteUrl})`)
                                         .replace("$ISSUE_URL", `${newIssue.data.html_url}`)
                                         .replace("$RESPONSE_CODE", result.httpCode.toString())
-                                    : `$EMOJI ${site.name} (${site.url}) is $STATUS : ${newIssue.data.html_url}`;
+                                    : `$EMOJI ${site.name} (${notificationSiteUrl}) is $STATUS : ${newIssue.data.html_url}`;
                                 await (0, notifme_1.sendNotification)(status === "down"
                                     ? `${downmsg
                                         .replace("$STATUS", "**down**")
@@ -665,8 +690,8 @@ generator: Upptime <https://github.com/upptime/upptime>
                             const upmsg = (await (0, secrets_1.getSecret)("NOTIFICATIONS_UP_MESSAGE"))
                                 ? ((0, secrets_1.getSecret)("NOTIFICATIONS_UP_MESSAGE") || "")
                                     .replace("$SITE_NAME", site.name)
-                                    .replace("$SITE_URL", `(${site.url})`)
-                                : `$EMOJI ${site.name} (${site.url}) $STATUS`;
+                                    .replace("$SITE_URL", `(${notificationSiteUrl})`)
+                                : `$EMOJI ${site.name} (${notificationSiteUrl}) $STATUS`;
                             await (0, notifme_1.sendNotification)(upmsg
                                 .replace("$EMOJI", `${config.commitPrefixStatusUp || "🟩"}`)
                                 .replace("$STATUS", `${issues.data[0].title.includes("degraded")
@@ -695,7 +720,7 @@ generator: Upptime <https://github.com/upptime/upptime>
     }
     (0, git_1.push)();
     if (hasDelta)
-        (0, summary_1.generateSummary)();
+        await (0, summary_1.generateSummary)();
 };
 exports.update = update;
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateSummary = exports.normalizeWorkflowBadges = void 0;
+exports.generateSummary = exports.deleteRecentStatusIssues = exports.normalizeWorkflowBadges = void 0;
 const fs_extra_1 = require("fs-extra");
 const path_1 = require("path");
 const prettier_1 = require("prettier");
@@ -38,6 +38,42 @@ const normalizeWorkflowBadges = (readmeContent, owner, repo) => workflowBadges.r
     return content.replace(workflowBadgePattern, workflowBadgeMarkdown(owner, repo, badge));
 }, readmeContent);
 exports.normalizeWorkflowBadges = normalizeWorkflowBadges;
+const recentIssueWindowMs = 15 * 60 * 1000;
+const deleteRecentStatusIssues = async (octokit, owner, repo, now = Date.now()) => {
+    const cutoff = now - recentIssueWindowMs;
+    const issuesRecentlyClosed = await octokit.paginate(octokit.issues.listForRepo, {
+        owner,
+        repo,
+        state: "closed",
+        labels: "status",
+        // `since` filters by updated_at, so the closed_at check below is still required.
+        since: new Date(cutoff).toISOString(),
+        per_page: 100,
+    });
+    console.log("Found recently closed issues", issuesRecentlyClosed.length);
+    for await (const issue of issuesRecentlyClosed) {
+        const closedAt = issue.closed_at ? new Date(issue.closed_at).getTime() : 0;
+        if (closedAt >= cutoff &&
+            // If this issue was closed within 15 minutes
+            closedAt - new Date(issue.created_at).getTime() < recentIssueWindowMs &&
+            // It has 1 comment (the default Upptime one)
+            issue.comments === 1) {
+            try {
+                console.log("Trying to delete issue", issue.number, issue.node_id);
+                const result = await octokit.graphql(`mutation deleteIssue($issueId: ID!) {
+            deleteIssue(input: { issueId: $issueId }) {
+              clientMutationId
+            }
+          }`, { issueId: issue.node_id });
+                console.log("Success", result);
+            }
+            catch (error) {
+                console.log("Error deleting this issue", error);
+            }
+        }
+    }
+};
+exports.deleteRecentStatusIssues = deleteRecentStatusIssues;
 const generateSummary = async () => {
     if (!(await (0, init_check_1.shouldContinue)()))
         return;
@@ -219,7 +255,7 @@ ${config.summaryEndHtmlComment || "<!--end: status pages-->"}${endText}`;
     await (0, fs_extra_1.writeFile)((0, path_1.join)(".", "README.md"), (0, prettier_1.format)(readmeContent, { parser: "markdown" }));
     await (0, fs_extra_1.writeFile)((0, path_1.join)(".", ".gitattributes"), "# Markdown\n*.md linguist-detectable=true\n*.md linguist-documentation=false\n\n# JSON\n*.json linguist-detectable=true\n\n# YAML\n*.yml linguist-detectable=true\n");
     (0, git_1.commit)((config.commitMessages || {}).readmeContent ||
-        ":pencil: Update summary in README [skip ci] [upptime]", (config.commitMessages || {}).commitAuthorName, (config.commitMessages || {}).commitAuthorEmail);
+        ":pencil: Update summary in README [skip ci] [upptime]", (config.commitMessages || {}).commitAuthorName, (config.commitMessages || {}).commitAuthorEmail, (config.commitMessages || {}).signoff);
     // If there are any old workflows left, fix them
     const workflows = (await (0, fs_extra_1.readdir)((0, path_1.join)(".", ".github", "workflows"))).filter((i) => i.endsWith(".yml"));
     for await (const workflow of workflows) {
@@ -232,42 +268,12 @@ ${config.summaryEndHtmlComment || "<!--end: status pages-->"}${endText}`;
     }
     await (0, fs_extra_1.writeFile)((0, path_1.join)(".", "history", "summary.json"), JSON.stringify(pageStatuses, null, 2));
     (0, git_1.commit)((config.commitMessages || {}).summaryJson ||
-        ":card_file_box: Update status summary [skip ci] [upptime]", (config.commitMessages || {}).commitAuthorName, (config.commitMessages || {}).commitAuthorEmail);
+        ":card_file_box: Update status summary [skip ci] [upptime]", (config.commitMessages || {}).commitAuthorName, (config.commitMessages || {}).commitAuthorEmail, (config.commitMessages || {}).signoff);
     (0, git_1.push)();
     if (!config.skipDeleteIssues) {
         // Find all the opened issues that shouldn't have opened
         // Say, Upptime found a down monitor and it was back up within 5 min
-        const issuesRecentlyClosed = await octokit.issues.listForRepo({
-            owner,
-            repo,
-            state: "closed",
-            labels: "status",
-            per_page: 10,
-        });
-        console.log("Found recently closed issues", issuesRecentlyClosed.data.length);
-        for await (const issue of issuesRecentlyClosed.data) {
-            if (issue.closed_at &&
-                // If this issue was closed within 15 minutes
-                new Date(issue.closed_at).getTime() -
-                    new Date(issue.created_at).getTime() <
-                    900000 &&
-                // It has 1 comment (the default Upptime one)
-                issue.comments === 1) {
-                try {
-                    console.log("Trying to delete issue", issue.number, issue.node_id);
-                    const result = await octokit.graphql(`
-      mutation deleteIssue {
-        deleteIssue(input:{issueId:"${issue.node_id}"}) {
-          clientMutationId
-        }
-      }`);
-                    console.log("Success", result);
-                }
-                catch (error) {
-                    console.log("Error deleting this issue", error);
-                }
-            }
-        }
+        await (0, exports.deleteRecentStatusIssues)(octokit, owner, repo);
     }
 };
 exports.generateSummary = generateSummary;
